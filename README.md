@@ -216,6 +216,9 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
 - **Opportunity cost**: the call is made for the team. Locking fills a slot, so it compares "this score plus the best
   fill of the other open slots" against "the best fill of all open slots with him still in the pool". A good-not-great
   score is held when a stronger player still to play needs that slot, and banked when slots are running out.
+- **UTIL last**: UTIL takes any position, so it's kept open longest. A lock call for a player sitting in UTIL says to
+  move him into an open G/F/C slot he fits first, then lock there; and today's lineup seats players in their positions
+  before UTIL.
 - **Today's lineup**: after those locks, every open slot gets someone who plays today. When more play than there are open
   slots, the slots go to the players whose game tonight is most likely to clear their lock target (expected points
   above it). Players already in a slot stay put where possible.

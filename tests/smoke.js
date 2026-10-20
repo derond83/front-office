@@ -210,5 +210,27 @@ for (const home of window.HOME_LEAGUES) {
   });
 }
 
+{
+  const LockIn = load("js/lockin.js");
+  const g = (date, state, extra) => ({ date, state, opp: "XXX", home: true, ...extra });
+  const fits = (id, slot) => slot === "UTIL" || ({ a: ["G"], b: ["G"], c: ["C"] })[id].includes(slot);
+  const plan = LockIn.plan({
+    slots: ["G", "UTIL", "C"], fits, today: "2026-10-22", optimize: Lineup.optimize,
+    players: {
+      a: { hist: [30, 30, 30, 30, 30], slot: 1, games: [g("2026-10-21", "done", { pts: 60 }), g("2026-10-23", "upcoming", { proj: 30 })] },
+      b: { hist: [25, 25, 25, 25, 25], slot: null, games: [g("2026-10-22", "upcoming", { proj: 25 })] },
+      c: { hist: [20, 20, 20, 20, 20], slot: null, games: [g("2026-10-22", "upcoming", { proj: 20 })] },
+    },
+  });
+  test("lock-in: a lock in UTIL moves to his position first", () => {
+    const d = plan.decisions.find((x) => x.pid === "a");
+    assert.strictEqual(d.rec, "lock"); assert.strictEqual(d.lockSlot, 0); assert.strictEqual(d.moveFrom, 1);
+  });
+  test("lock-in: today's players take their position before UTIL", () => {
+    assert.strictEqual(plan.today.lineup[2], "c", "the center plays C, not UTIL");
+    assert.strictEqual(plan.today.lineup[1], "b", "the guard gets UTIL only because G is being locked");
+  });
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

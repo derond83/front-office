@@ -161,10 +161,11 @@
     const holdNow = P.decisions.filter((d) => d.rec === "hold");
     const ins = T.startNow.filter((x) => !x.already);
     const outs = curOpen.filter((id) => !placedToday.has(id) && !lockNow.some((d) => d.pid === id));
-    const lockBtn = (d) => `<button type="button" class="more small-btn" data-lockin="${d.slot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(d.game.date)}">I locked him in</button>`;
+    const lockBtn = (d) => `<button type="button" class="more small-btn" data-lockin="${d.lockSlot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(d.game.date)}">I locked him in</button>`;
     const todo = [];
-    for (const d of lockNow) todo.push(`<li class="todo todo-lock"><span class="rec rec-lock">Lock</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.slot]))}</span>
-      <span class="small">${f1(d.x)}${d.why === "last" ? " · no games left" : ` vs target ${f1(d.target)}`}</span></span>${lockBtn(d)}</li>`);
+    const moveNote = (d) => d.moveFrom == null || slots[d.moveFrom] === slots[d.lockSlot] ? "" : ` <span class="small"><strong>Move him from ${esc(DH.fmt.slot(slots[d.moveFrom]))} to ${esc(DH.fmt.slot(slots[d.lockSlot]))} first</strong>, then lock, so ${esc(DH.fmt.slot(slots[d.moveFrom]))} stays open.</span>`;
+    for (const d of lockNow) todo.push(`<li class="todo todo-lock"><span class="rec rec-lock">Lock</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.lockSlot]))}</span>
+      <span class="small">${f1(d.x)}${d.why === "last" ? " · no games left" : ` vs target ${f1(d.target)}`}</span>${moveNote(d)}</span>${lockBtn(d)}</li>`);
     for (const x of ins) {
       const from = me.ps[x.pid].slot == null ? "from the bench" : `from ${esc(DH.fmt.slot(slots[me.ps[x.pid].slot]))}`;
       const g = P.info[x.pid].todayGame;
@@ -199,8 +200,8 @@
         <div class="dec-main"><span class="rec rec-${d.rec}">${d.rec === "lock" ? "Lock" : "Hold"}</span>
           <div class="dec-text"><div>${who(d.pid)} <span class="muted small">${esc(DH.fmt.slot(slots[d.slot]))}</span></div>
           <div class="small">Scored <strong>${f1(d.x)}</strong>${d.why === "last" ? "" : ` (lock target ${f1(d.target)})`} ${dayName(g.date)} ${g.home ? "vs" : "@"} ${esc(g.opp)} · games left: ${left(info)}${d.left ? ` · ${pct(d.pBeat)} chance a later game beats it` : ""}</div>
-          <div class="small muted">${why}</div></div></div>
-        <button type="button" class="more" data-lockin="${d.slot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(g.date)}">I locked him in</button>
+          <div class="small muted">${why}${d.rec === "lock" && d.moveFrom != null ? ` Lock him at ${esc(DH.fmt.slot(slots[d.lockSlot]))}, not ${esc(DH.fmt.slot(slots[d.moveFrom]))}: ${esc(DH.fmt.slot(slots[d.moveFrom]))} can take more of your players.` : ""}</div></div></div>
+        <button type="button" class="more" data-lockin="${d.rec === "lock" ? d.lockSlot : d.slot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(g.date)}">I locked him in</button>
       </li>`;
     }).join("");
     const benchScored = Object.values(P.info).filter((i) => i.candidate && (i.slot == null)).map((i) => i.pid);

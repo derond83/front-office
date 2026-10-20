@@ -139,6 +139,7 @@
      */
     function simulate(v = {}) {
       let sum = 0, sum2 = 0;
+      const totals = new Float64Array(R);
       const open0 = new Array(S).fill(false);
       for (const i of openIdx) open0[i] = true;
       const removed0 = new Array(P).fill(false);
@@ -191,13 +192,42 @@
         }
         // End of the week: each open slot counts its player's final game.
         for (let s = 0; s < S; s++) if (open[s] && last[s]) total += last[s][1];
-        sum += total; sum2 += total * total;
+        totals[r] = total; sum += total; sum2 += total * total;
       }
       const m = sum / R;
-      return { mean: m, sd: Math.sqrt(Math.max(0, sum2 / R - m * m)) };
+      return { mean: m, sd: Math.sqrt(Math.max(0, sum2 / R - m * m)), totals };
     }
 
     const lockedPts = Object.values(o.locks || {}).reduce((s, l) => s + (Number(l.pts) || 0), 0);
+
+    // Win chance: your simulated final against the opponent's simulated finals (ties count half).
+    const opp = o.oppTotals && o.oppTotals.length ? Float64Array.from(o.oppTotals).sort() : null;
+    const beats = (t) => {
+      let lo = 0, hi = opp.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (opp[m] < t) lo = m + 1; else hi = m; }
+      let eq = lo; while (eq < opp.length && opp[eq] === t) eq++;
+      return (lo + (eq - lo) / 2) / opp.length;
+    };
+    const winChance = (totals, add) => { let w = 0; for (const t of totals) w += beats(t + add); return w / totals.length; };
+    const goal = o.goal === "points" || !opp ? "points" : "win";
+    /**
+     * The lock target from the two simulated futures: hold (he stays unlocked) and rest (his slot is closed;
+     * his score is added outside). By points: where the averages meet. By win chance: the smallest score that
+     * makes locking win at least as often as holding, unless the matchup is decided either way, when the
+     * points target applies.
+     */
+    function targetFor(hold, rest, base) {
+      const byPoints = Math.max(0, hold.mean - rest.mean);
+      if (goal !== "win") return byPoints;
+      const pHold = winChance(hold.totals, base);
+      const lo0 = winChance(rest.totals, base), hi0 = winChance(rest.totals, base + 150);
+      if (hi0 - lo0 < 0.02 || pHold < 0.02 || pHold > 0.98) return byPoints;
+      if (lo0 >= pHold) return 0;
+      if (hi0 < pHold) return 150;
+      let lo = 0, hi = 150;
+      for (let it = 0; it < 24; it++) { const m = (lo + hi) / 2; if (winChance(rest.totals, base + m) >= pHold) hi = m; else lo = m; }
+      return hi;
+    }
 
     // Where to lock a player: before locking you can move him to an open slot he fits of a different kind
     // (its occupant swaps into his old one). Positions before UTIL; among those, the narrowest.
@@ -223,9 +253,7 @@
       const base = { pid: id, slot: p.slot, lockSlot, game: c, x, hold: p.hold, left: p.upcoming.length, beatHist, nHist: p.hist.length };
       if (p.hold == null) { decisions.push({ ...base, rec: "lock", why: "last", pBeat: 0, target: 0 }); continue; }
       const pBeat = beatChance(p.dists, x);
-      const held = simulate({ drop: id }).mean;
-      const rest = simulate({ lockNow: { pid: id, slot: lockSlot } }).mean;
-      const target = Math.max(0, held - rest);
+      const target = targetFor(simulate({ drop: id }), simulate({ lockNow: { pid: id, slot: lockSlot } }), lockedPts);
       const own = x >= p.hold ? "lock" : "hold";
       const rec = x >= target - cushion ? "lock" : "hold";
       const close = rec === "lock" && x < target;
@@ -250,6 +278,7 @@
     // ---- Today's lineup. Slots you're about to lock (per the calls above) aren't open for today.
     const lockingNow = new Map(decisions.filter((d) => d.rec === "lock").map((d) => [d.lockSlot, d.pid]));
     const forced = Object.fromEntries(lockingNow);
+    const forcedPtsNow = decisions.filter((d) => d.rec === "lock").reduce((s, d) => s + d.x, 0);
     const openToday = openIdx.filter((i) => !lockingNow.has(i));
     const lockingIds = new Set(lockingNow.values());
     // Each of tonight's players: the score that would make locking tonight's game worth it, and what having
@@ -260,9 +289,7 @@
       if (!p.todayGame || lockingIds.has(id) || !openToday.some((i) => o.fits(id, o.slots[i]))) continue;
       const kk = p.upcoming.indexOf(p.todayGame), d = p.dists[kk];
       if (p.holdFrom[kk + 1] == null) { tonight[id] = { target: 0, last: true, option: expected(d), dist: d }; continue; }
-      const held = simulate({ forced, tonight: { pid: id, mode: "hold" } }).mean;
-      const rest = simulate({ forced, tonight: { pid: id, mode: "lock" } }).mean;
-      const target = Math.max(0, held - rest);
+      const target = targetFor(simulate({ forced, tonight: { pid: id, mode: "hold" } }), simulate({ forced, tonight: { pid: id, mode: "lock" } }), lockedPts + forcedPtsNow);
       tonight[id] = { target, option: d.reduce((s, x) => s + Math.max(0, x.v - target) * x.p, 0), dist: d, left: p.upcoming.length - kk - 1 };
     }
     // Who gets tonight's open slots: the most to gain, seated in their positions before UTIL, else left in place.
@@ -291,7 +318,10 @@
     return {
       info, openIdx, decisions, lockedPts,
       today: { lineup, startNow, benchPlaying, idleInSlot, openToday, lockingNow: forced, targets, tonight },
-      projected: { locked: lockedPts, open: forcedPts + restOfWeek.mean, total: lockedPts + forcedPts + restOfWeek.mean, sd: restOfWeek.sd },
+      goal,
+      projected: { locked: lockedPts, open: forcedPts + restOfWeek.mean, total: lockedPts + forcedPts + restOfWeek.mean, sd: restOfWeek.sd,
+        totals: Array.from(restOfWeek.totals, (t) => t + lockedPts + forcedPts),
+        winProb: opp ? winChance(restOfWeek.totals, lockedPts + forcedPts) : null },
     };
 
     /** Pick up to |slots| players for these slots maximizing the sum of val (exact assignment over slots). */

@@ -255,5 +255,19 @@ for (const home of window.HOME_LEAGUES) {
   });
 }
 
+{
+  // Win the matchup: ahead, bank sooner; behind, hold out for more.
+  const LockIn = load("js/lockin.js");
+  const g = (date, state, extra) => ({ date, state, opp: "XXX", home: true, ...extra });
+  const players = { a: { hist: [10, 20, 30, 40, 50, 15, 25, 35, 45, 30], slot: 0,
+    games: [g("2026-10-21", "done", { pts: 30 }), g("2026-10-23", "upcoming", { proj: 30 }), g("2026-10-25", "upcoming", { proj: 30 })] } };
+  const run = (goal, oppTotals) => LockIn.plan({ slots: ["UTIL"], fits: () => true, today: "2026-10-22", players, goal, oppTotals }).decisions[0].target;
+  const pts = run("points");
+  const ahead = run("win", Array.from({ length: 200 }, (_, i) => 22 + (i % 5)));
+  const behind = run("win", Array.from({ length: 200 }, (_, i) => 38 + (i % 5)));
+  test("lock-in: win strategy banks sooner when ahead", () => assert.ok(ahead < pts, `ahead ${ahead.toFixed(1)} vs points ${pts.toFixed(1)}`));
+  test("lock-in: win strategy holds out when behind", () => assert.ok(behind > pts, `behind ${behind.toFixed(1)} vs points ${pts.toFixed(1)}`));
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

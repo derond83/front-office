@@ -216,6 +216,13 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
 - **Lock or hold** is optimal stopping. Holding is worth the expected result of taking the best of his remaining
   games and otherwise his last one (which counts whatever it is). Lock when the score in hand beats that. Each call
   shows how many of his last 10 games beat the score and the chance a remaining game does.
+- **Lock strategy** (Settings, default "Win this week's matchup"): the opponent's week is simulated the same way, and a
+  target is the smallest score that makes locking win the matchup at least as often as holding. Ahead, that banks
+  solid games sooner; behind, it holds out for big ones. When the matchup is decided either way, or with "Most points",
+  the target is where locking and holding are worth the same expected points.
+- **Targets move**: they're recalculated every time the page opens. Within a week they fall as a player's games run
+  out (his last game's target is 0: it counts regardless) and shift as slots fill and the matchup swings; across the
+  season they follow form, since the last-10-games window rolls forward.
 - **Opportunity cost** is part of the simulation: locking closes a slot for the rest of the week. A good-not-great score
   is held when your other players are likely to need that slot, and banked when there's room.
 - **UTIL last**: UTIL takes any position, so it's kept open longest. A lock call for a player sitting in UTIL says to

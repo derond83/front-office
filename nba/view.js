@@ -250,7 +250,10 @@
           <div class="field"><label for="mm-${esc(ctx.id)}">Matchup scoring</label><select id="mm-${esc(ctx.id)}" class="source-select" data-matchupmode>
             ${[["lockin", "Lock-In (one game per slot)"], ["all", "Every game counts"]].map(([v, l]) => `<option value="${v}"${matchupMode() === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
           <p class="small muted">Lock-In is Sleeper's standard basketball format: each starting slot counts one game a week, the one you lock in (or its last game). Choose "Every game counts" only if your league adds up all of a player's games.</p>` },
-        ...(matchupMode() === "lockin" ? [{ title: "Lock-In matchups", note: "How the Matchup tab calls locks.", body: DH.knobsHtml(ctx, LOCK_KNOBS, { lockCushion: Number(opts().lockCushion) || 0 }) }] : []),
+        ...(matchupMode() === "lockin" ? [{ title: "Lock-In matchups", note: "How the Matchup tab calls locks.", body: `<div class="pickers"><div class="field"><label for="lg-${esc(ctx.id)}">Lock strategy</label><select id="lg-${esc(ctx.id)}" class="source-select" data-lockgoal>
+            ${[["win", "Win this week's matchup"], ["points", "Most points"]].map(([v, l]) => `<option value="${v}"${(opts().lockGoal === "points" ? "points" : "win") === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
+          <p class="small muted">Win the matchup: when you're ahead, bank solid games; when you're behind, hold out for big ones. Most points: always the most expected points, whatever the opponent does.</p>
+          ${DH.knobsHtml(ctx, LOCK_KNOBS, { lockCushion: Number(opts().lockCushion) || 0 })}` }] : []),
         { title: "Moves", note: "How waiver moves are judged.", body: DH.knobsHtml(ctx, MOVE_KNOBS, opts()) },
         { title: "Trades", note: "How trade ideas are judged.", body: `<div class="pickers"><div class="field"><label for="tv-${esc(ctx.id)}">Trade values</label>
             <select id="tv-${esc(ctx.id)}" class="source-select" data-tradevalues>${TRADE_VALUE_MODES.map(([v, l]) => `<option value="${v}"${opts().tradeValues === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
@@ -308,7 +311,7 @@
       const groups = (id) => [...new Set(pos(id).map((x) => A.POS_GROUP[x]).filter(Boolean))];
       const fits = (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g));
       // Sleeper basketball leagues score Lock-In by default (one game per slot per week).
-      if (matchupMode() === "lockin") return DH.lockinHtml(ctx, { chips: posChips, groupsOf: groups, fits, cushion: Number(opts().lockCushion) || 0 });
+      if (matchupMode() === "lockin") return DH.lockinHtml(ctx, { chips: posChips, groupsOf: groups, fits, cushion: Number(opts().lockCushion) || 0, goal: opts().lockGoal === "points" ? "points" : "win" });
       return DH.matchupHtml(ctx, {
         sport: "nba", chips: posChips, groupsOf: groups,
         fits: (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g)),
@@ -332,6 +335,7 @@
     el.onchange = (e) => {
       const t = e.target;
       if (t.matches("[data-team]")) return ctx.setTeam(t.value);
+      if (t.matches("[data-lockgoal]")) { ctx.store.set("options", { ...(ctx.store.get("options", {}) || {}), lockGoal: t.value }); return ctx.rerender(); }
       if (t.matches("[data-matchupmode]")) { ctx.store.set("options", { ...(ctx.store.get("options", {}) || {}), matchupMode: t.value }); return ctx.rerender(); }
       if (t.matches("[data-tradevalues]")) { ctx.store.set("options", { ...(ctx.store.get("options", {}) || {}), tradeValues: t.value }); return ctx.rerender(); }
       if (t.matches("[data-sort]")) { view.wireSort = t.value; view.wireShown = null; return redrawPlayers(); }

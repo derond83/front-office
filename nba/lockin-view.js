@@ -100,7 +100,7 @@
     }
     const active = (r) => { const out = new Set([...(r.reserve || []), ...(r.taxi || [])].map(String)); return (r.players || []).map(String).filter((id) => !out.has(id)); };
 
-    function side(roster, m, locks) {
+    function side(roster, m, locks, extra = {}) {
       const starters = ((m && m.starters) || roster.starters || []).map((x) => (x && x !== "0" ? String(x) : null));
       const ps = {};
       for (const id of active(roster)) {
@@ -110,7 +110,7 @@
         const idx = starters.indexOf(id);
         ps[id] = { hist: thisWeek.concat(older), games, injury: injury(id), slot: idx >= 0 && idx < slots.length ? idx : null };
       }
-      const plan = window.LockIn.plan({ slots, fits: sp.fits, players: ps, locks, today, cushion: sp.cushion || 0, optimize: window.LineupEngine.optimize });
+      const plan = window.LockIn.plan({ slots, fits: sp.fits, players: ps, locks, today, cushion: sp.cushion || 0, ...extra });
       return { plan, ps, starters };
     }
 
@@ -122,8 +122,9 @@
     const store = lockStore(ctx, season, week);
     // A marked lock whose player has left the roster no longer applies.
     const locks = Object.fromEntries(Object.entries(store.slots).filter(([, l]) => mineRoster.players.map(String).includes(String(l.pid))));
-    const me = side(mineRoster, myM, locks);
-    const them = oppRoster ? side(oppRoster, oppM, {}) : null;
+    // Their week first: your targets aim to beat it (Settings > Lock strategy).
+    const them = oppRoster ? side(oppRoster, oppM, {}, { cushion: 0, goal: "points" }) : null;
+    const me = side(mineRoster, myM, locks, { goal: sp.goal || "win", oppTotals: them ? them.plan.projected.totals : null });
     const P = me.plan;
 
     // ---- Pieces
@@ -137,8 +138,7 @@
     const left = (info) => (info.upcoming.length ? info.upcoming.map((g) => `${g.date === today ? "today" : dayName(g.date)} ${g.home ? "vs" : "@"} ${esc(g.opp)}`).join(", ") : "none");
 
     // Scoreboard
-    const z = them ? (P.projected.total - them.plan.projected.total) / Math.sqrt(P.projected.sd ** 2 + them.plan.projected.sd ** 2 || 1) : 0;
-    const wp = them ? 1 / (1 + Math.exp(-1.702 * z)) : null;
+    const wp = them ? P.projected.winProb : null;
     const nLocked = Object.keys(locks).length;
     const board = `<section class="card section scoreboard">
       <div class="section-head"><h2>Week ${week}${oppName ? ` · vs ${esc(oppName)}` : ""}</h2>
@@ -185,7 +185,7 @@
     for (const d of holdNow.filter((x) => !outs.includes(x.pid))) todo.push(`<li class="todo"><span class="rec rec-hold">Hold</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.slot]))}</span>
       <span class="small">${f1(d.x)} vs target ${f1(d.target)} · ${d.left} game${d.left === 1 ? "" : "s"} left</span></span></li>`);
     const checklist = `<section class="card section checklist"><div class="section-head"><h2>Today's checklist · ${dayName(today)}</h2>
-        <p>Do these in Sleeper, in this order: locks first, then lineup moves. A starter's lock target is the score that makes locking worth more to your week than holding his slot open${sp.cushion ? `; you lock anything within ${f1(sp.cushion)} points of it (Settings)` : ""}.</p></div>
+        <p>Do these in Sleeper, in this order: locks first, then lineup moves. A starter's lock target is the score where locking him now ${P.goal === "win" ? "wins this matchup at least as often as holding his slot open (when the matchup isn't already decided either way; then it's the score worth the most points)" : "is worth as many points to your week as holding his slot open"}${sp.cushion ? `; you lock anything within ${f1(sp.cushion)} points of it` : ""}. Targets are recalculated each time you open this page, as games finish and slots fill.</p></div>
       ${todo.length ? `<ol class="todos">${todo.join("")}</ol>` : '<div class="empty">Nothing to do right now: no locks to make, and your lineup already has everyone who plays today.</div>'}
       ${T.benchPlaying.length ? `<p class="small muted">Also playing today, with no open slot: ${T.benchPlaying.map((id) => esc(pname(id))).join(", ")}.</p>` : ""}</section>`;
 

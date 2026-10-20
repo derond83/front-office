@@ -110,7 +110,7 @@
         const idx = starters.indexOf(id);
         ps[id] = { hist: thisWeek.concat(older), games, injury: injury(id), slot: idx >= 0 && idx < slots.length ? idx : null };
       }
-      const plan = window.LockIn.plan({ slots, fits: sp.fits, players: ps, locks, today, optimize: window.LineupEngine.optimize });
+      const plan = window.LockIn.plan({ slots, fits: sp.fits, players: ps, locks, today, cushion: sp.cushion || 0, optimize: window.LineupEngine.optimize });
       return { plan, ps, starters };
     }
 
@@ -153,6 +153,38 @@
         : `<div class="sb-side"><span class="muted">${matchups.length ? "No opponent this week." : "This week's matchups aren't set in Sleeper yet."}</span></div>`}
       </div></section>`;
 
+    // ---- Today's checklist: what to do in Sleeper now.
+    const T = P.today;
+    const curOpen = P.openIdx.map((i) => me.starters[i]).filter(Boolean);
+    const placedToday = new Set(Object.values(T.lineup));
+    const lockNow = P.decisions.filter((d) => d.rec === "lock");
+    const holdNow = P.decisions.filter((d) => d.rec === "hold");
+    const ins = T.startNow.filter((x) => !x.already);
+    const outs = curOpen.filter((id) => !placedToday.has(id) && !lockNow.some((d) => d.pid === id));
+    const lockBtn = (d) => `<button type="button" class="more small-btn" data-lockin="${d.slot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(d.game.date)}">I locked him in</button>`;
+    const todo = [];
+    for (const d of lockNow) todo.push(`<li class="todo todo-lock"><span class="rec rec-lock">Lock</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.slot]))}</span>
+      <span class="small">${f1(d.x)}${d.why === "last" ? " · no games left" : ` vs target ${f1(d.target)}`}</span></span>${lockBtn(d)}</li>`);
+    for (const x of ins) {
+      const from = me.ps[x.pid].slot == null ? "from the bench" : `from ${esc(DH.fmt.slot(slots[me.ps[x.pid].slot]))}`;
+      const g = P.info[x.pid].todayGame;
+      todo.push(`<li class="todo"><span class="rec rec-start">Start</span><span>${who(x.pid)} <span class="small muted">at ${esc(DH.fmt.slot(slots[x.slot]))}, ${from}</span>
+        <span class="small">${g.home ? "vs" : "@"} ${esc(g.opp)} today</span></span></li>`);
+    }
+    for (const id of outs) {
+      const d = holdNow.find((x) => x.pid === id);
+      const plays = P.info[id] && P.info[id].todayGame;
+      const reason = plays ? "plays today, but the others' games matter more this week" : "no game today";
+      const why = d ? `don't lock ${f1(d.x)} (target ${f1(d.target)}); ${reason}` : reason;
+      todo.push(`<li class="todo"><span class="rec rec-sit">Bench</span><span>${who(id)} <span class="small muted">${why}</span></span></li>`);
+    }
+    for (const d of holdNow.filter((x) => !outs.includes(x.pid))) todo.push(`<li class="todo"><span class="rec rec-hold">Hold</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.slot]))}</span>
+      <span class="small">${f1(d.x)} vs target ${f1(d.target)} · ${d.left} game${d.left === 1 ? "" : "s"} left</span></span></li>`);
+    const checklist = `<section class="card section checklist"><div class="section-head"><h2>Today's checklist · ${dayName(today)}</h2>
+        <p>Do these in Sleeper, in this order: locks first, then lineup moves. A starter's lock target is the score that makes locking worth more to your week than holding his slot open${sp.cushion ? `; you lock anything within ${f1(sp.cushion)} points of it (Settings)` : ""}.</p></div>
+      ${todo.length ? `<ol class="todos">${todo.join("")}</ol>` : '<div class="empty">Nothing to do right now: no locks to make, and your lineup already has everyone who plays today.</div>'}
+      ${T.benchPlaying.length ? `<p class="small muted">Also playing today, with no open slot: ${T.benchPlaying.map((id) => esc(pname(id))).join(", ")}.</p>` : ""}</section>`;
+
     // Lock or hold
     const decisions = P.decisions.map((d) => {
       const info = P.info[d.pid];
@@ -160,37 +192,39 @@
       const why = d.why === "last" ? "No games left this week, so this is his score either way. Lock it so a later lineup move can't replace it."
         : d.why === "slots" && d.rec === "hold" ? `On his own this is a lock, but locking would use up a slot ${d.instead ? `${esc(pname(d.instead))} is expected to fill for more` : "your other players are expected to fill for more"} later this week. Hold, and start him there when he plays.`
         : d.why === "slots" ? `Holding would usually pay off for him, but your open slots are filling up: banking ${f1(d.x)} now is worth more to the team.`
+        : d.why === "cushion" ? `Just under the target of ${f1(d.target)}, but within your ${f1(sp.cushion)}-point cushion, so lock.`
         : d.rec === "lock" ? `He beat ${f1(d.x)} in only ${d.beatHist} of his last ${d.nHist} games; holding is worth about ${f1(d.hold)}.`
         : `He beat ${f1(d.x)} in ${d.beatHist} of his last ${d.nHist} games and has ${d.left} more this week; holding is worth about ${f1(d.hold)}.`;
       return `<li class="decision dec-${d.rec}">
         <div class="dec-main"><span class="rec rec-${d.rec}">${d.rec === "lock" ? "Lock" : "Hold"}</span>
           <div class="dec-text"><div>${who(d.pid)} <span class="muted small">${esc(DH.fmt.slot(slots[d.slot]))}</span></div>
-          <div class="small">Scored <strong>${f1(d.x)}</strong> ${dayName(g.date)} ${g.home ? "vs" : "@"} ${esc(g.opp)} · games left: ${left(info)}${d.left ? ` · ${pct(d.pBeat)} chance a later game beats it` : ""}</div>
+          <div class="small">Scored <strong>${f1(d.x)}</strong>${d.why === "last" ? "" : ` (lock target ${f1(d.target)})`} ${dayName(g.date)} ${g.home ? "vs" : "@"} ${esc(g.opp)} · games left: ${left(info)}${d.left ? ` · ${pct(d.pBeat)} chance a later game beats it` : ""}</div>
           <div class="small muted">${why}</div></div></div>
         <button type="button" class="more" data-lockin="${d.slot}" data-pid="${esc(d.pid)}" data-pts="${d.x}" data-date="${esc(g.date)}">I locked him in</button>
       </li>`;
     }).join("");
     const benchScored = Object.values(P.info).filter((i) => i.candidate && (i.slot == null)).map((i) => i.pid);
-    const lockSec = `<section class="section"><div class="section-head"><h2>Lock or hold</h2>
+    const lockSec = `<section class="section"><div class="section-head"><h2>Lock or hold: the details</h2>
         <p>Starters with a finished game you can still lock. The odds come from his last ${window.LockIn.DEFAULTS.nHist} games, adjusted for each remaining matchup's projection and his injury status; the call also weighs what your other players could still put in that slot. Mark a lock here after you make it in Sleeper.</p></div>
       ${decisions ? `<ol class="decisions">${decisions}</ol>` : '<div class="empty">Nothing to decide right now: none of your starters has a finished game waiting.</div>'}
       ${benchScored.length ? `<p class="small muted">Played on your bench, so it can't be locked: ${benchScored.map((id) => esc(pname(id))).join(", ")}.</p>` : ""}</section>`;
 
-    // Today's lineup
-    const T = P.today;
+    // Today's lineup, with tonight's lock targets
     const todayRows = P.openIdx.map((i) => {
-      if (T.lockingNow[i]) return `<tr class="locked-row"><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${who(T.lockingNow[i])} <span class="tag fit">Lock in</span></td><td class="small muted">Lock him first; this slot is then set for the week</td></tr>`;
+      if (T.lockingNow[i]) return `<tr class="locked-row"><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${who(T.lockingNow[i])} <span class="tag fit">Lock in</span></td><td class="small muted">Lock him first; this slot is then set for the week</td><td></td></tr>`;
       const id = T.lineup[i], cur = me.starters[i];
       const g = id && P.info[id].todayGame;
-      if (!id) return `<tr><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${cur ? who(cur) : '<span class="muted">Empty</span>'}</td><td class="small muted">No one who fits plays today</td></tr>`;
+      if (!id) return `<tr><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${cur ? who(cur) : '<span class="muted">Empty</span>'}</td><td class="small muted">No one who fits plays today</td><td></td></tr>`;
       const move = id === cur ? '<span class="tag fit">Set</span>' : `<span class="tag warn">Start</span>${cur ? ` <span class="small muted">over ${esc(pname(cur))}</span>` : ""}`;
-      return `<tr><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${who(id)} ${move}</td><td class="small">${g.home ? "vs" : "@"} ${esc(g.opp)}${g.proj != null ? ` · proj ${f1(g.proj)}` : ""}</td></tr>`;
+      const t = T.targets[id];
+      const tgt = !t ? "" : t.last ? '<span class="small">Last game: counts as is</span>'
+        : `<b>${f1(t.lockAt)}+</b> <span class="small muted">${t.pReach < 0.05 ? "unlikely" : `${pct(t.pReach)} chance`}</span>`;
+      return `<tr><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${who(id)} ${move}</td><td class="small">${g.home ? "vs" : "@"} ${esc(g.opp)}${g.proj != null ? ` · proj ${f1(g.proj)}` : ""}</td><td>${tgt}</td></tr>`;
     }).join("");
-    const changes = T.startNow.filter((s) => !s.already).length;
     const todaySec = `<section class="section"><div class="section-head"><h2>Today's lineup · ${dayName(today)}</h2>
-        <p>After the locks above, every open slot should have someone playing today: a game only counts if he started it. When more of your players play today than you have open slots, the ones whose game today could matter most get the slots. Players already in a slot stay put where possible.</p></div>
-      ${P.openIdx.length ? `<div class="table-wrap"><table class="lineups"><thead><tr><th>Slot</th><th>Start today</th><th>Game</th></tr></thead><tbody>${todayRows}</tbody></table></div>
-        <p class="small ${changes ? "" : "muted"}">${changes ? `${changes} change${changes > 1 ? "s" : ""} to make in Sleeper before tip-off.` : "Your Sleeper lineup already has today right."}${T.benchPlaying.length ? ` Also playing today with no open slot: ${T.benchPlaying.map((id) => esc(pname(id))).join(", ")}.` : ""}</p>`
+        <p>After the locks, every open slot should have someone playing today: a game only counts if he started it. When more of your players play today than you have open slots, the ones whose game today could matter most get the slots. "Lock tonight if" is his target for tonight's game: check back after it and lock if he reached it.</p></div>
+      ${P.openIdx.length ? `<div class="table-wrap"><table class="lineups"><thead><tr><th>Slot</th><th>Start today</th><th>Game</th><th>Lock tonight if</th></tr></thead><tbody>${todayRows}</tbody></table></div>
+`
         : '<div class="empty">Every slot is locked in for the week.</div>'}</section>`;
 
     // Slots and bench, this week
@@ -225,7 +259,7 @@
     if (!G) notes.push("Recent games didn't load, so the odds lean on projections only.");
     if (!wk.stats) notes.push("This week's box scores didn't load from Sleeper; finished games may be missing. Try Refresh.");
 
-    return `${board}${lockSec}${todaySec}${slotSec}
+    return `${board}${checklist}${todaySec}${lockSec}${slotSec}
       ${notes.length ? `<section class="section"><div class="section-head"><h2>Before games lock</h2></div><ul class="notes">${notes.map((n) => `<li>${n}</li>`).join("")}</ul></section>` : ""}
       <p class="small muted">Games and box scores: Sleeper, live (loaded ${new Date(wk.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}). <button type="button" class="linklike" data-lockin-refresh>Refresh</button>.
       Recent games and projections refresh twice a day. Lock-In format details: <a href="https://support.sleeper.com/en/articles/4644860-league-formats-game-modes" target="_blank" rel="noopener">Sleeper help</a>.</p>`;

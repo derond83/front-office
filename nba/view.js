@@ -12,6 +12,10 @@
   // Which Sleeper positions can fill each starting slot (for the Matchup tab).
   const SLOT_POS = { PG: ["PG"], SG: ["SG"], SF: ["SF"], PF: ["PF"], C: ["C"], G: ["PG", "SG", "G"], F: ["SF", "PF", "F"],
     UTIL: ["PG", "SG", "SF", "PF", "C", "G", "F"] };
+  const LOCK_KNOBS = {
+    lockCushion: { label: "Lock-in cushion", min: 0, max: 10, step: 0.5, fmt: (v) => (v ? `${v.toFixed(1)} pts` : "None"),
+      help: "Lock a starter when his score is within this many points of his lock target, not only at or above it. More cushion banks more games early; 0 follows the odds exactly." },
+  };
   const MOVE_KNOBS = {
     minGain: { label: "Minimum upgrade", min: 0, max: 0.5, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%`,
       help: "A waiver swap has to add at least this much dynasty value before it's suggested (12% is about 12 ranking spots in the 100–250 range)." },
@@ -246,6 +250,7 @@
           <div class="field"><label for="mm-${esc(ctx.id)}">Matchup scoring</label><select id="mm-${esc(ctx.id)}" class="source-select" data-matchupmode>
             ${[["lockin", "Lock-In (one game per slot)"], ["all", "Every game counts"]].map(([v, l]) => `<option value="${v}"${matchupMode() === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
           <p class="small muted">Lock-In is Sleeper's standard basketball format: each starting slot counts one game a week, the one you lock in (or its last game). Choose "Every game counts" only if your league adds up all of a player's games.</p>` },
+        ...(matchupMode() === "lockin" ? [{ title: "Lock-In matchups", note: "How the Matchup tab calls locks.", body: DH.knobsHtml(ctx, LOCK_KNOBS, { lockCushion: Number(opts().lockCushion) || 0 }) }] : []),
         { title: "Moves", note: "How waiver moves are judged.", body: DH.knobsHtml(ctx, MOVE_KNOBS, opts()) },
         { title: "Trades", note: "How trade ideas are judged.", body: `<div class="pickers"><div class="field"><label for="tv-${esc(ctx.id)}">Trade values</label>
             <select id="tv-${esc(ctx.id)}" class="source-select" data-tradevalues>${TRADE_VALUE_MODES.map(([v, l]) => `<option value="${v}"${opts().tradeValues === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
@@ -303,7 +308,7 @@
       const groups = (id) => [...new Set(pos(id).map((x) => A.POS_GROUP[x]).filter(Boolean))];
       const fits = (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g));
       // Sleeper basketball leagues score Lock-In by default (one game per slot per week).
-      if (matchupMode() === "lockin") return DH.lockinHtml(ctx, { chips: posChips, groupsOf: groups, fits });
+      if (matchupMode() === "lockin") return DH.lockinHtml(ctx, { chips: posChips, groupsOf: groups, fits, cushion: Number(opts().lockCushion) || 0 });
       return DH.matchupHtml(ctx, {
         sport: "nba", chips: posChips, groupsOf: groups,
         fits: (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g)),
@@ -318,7 +323,7 @@
     function redrawAfterTuning() {
       analyze();
       el.querySelector('[data-r="summary"]').innerHTML = summaryHtml();
-      const K = { ...MOVE_KNOBS, ...TRADE_KNOBS }, v = opts();
+      const K = { ...MOVE_KNOBS, ...TRADE_KNOBS, ...LOCK_KNOBS }, v = { lockCushion: 0, ...opts() };
       for (const out of el.querySelectorAll("[data-out]")) out.textContent = K[out.dataset.out].fmt(Number(v[out.dataset.out]));
       el.querySelector('[data-r="settings-sum"]').textContent = settingsSummary();
     }

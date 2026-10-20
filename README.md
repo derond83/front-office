@@ -202,14 +202,23 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
 - **A player's next game** is modelled from his last 10 games scored with the league's settings, nudged by
   Sleeper's projection for that game (opponent, home/away, minutes; half weight, within ±25%), with a chance he
   doesn't play: 95% healthy, 75% day-to-day, 60% questionable, 25% doubtful, 0 out.
+- **Today's checklist** (top of the tab) is the daily routine, in order: **Lock** (with the score and its target),
+  **Start** (bench players to move in, and where), **Bench** (starters with no game today, or whose game matters less),
+  **Hold** (starters to leave unlocked).
+- **Lock target**: the score at which locking is worth as much to the week as holding the slot open. It's the larger of
+  what the player is expected to beat later and what the best bench player who'd otherwise take that slot is worth.
+  Lock at or above it. Settings → **Lock-in cushion** (0–10 points, default 0) locks anything within that many points
+  of the target, for banking games earlier. "Lock tonight if" in Today's lineup is each starter's target for tonight's
+  game, with his chance of reaching it.
 - **Lock or hold** is optimal stopping. Holding is worth the expected result of taking the best of his remaining
   games and otherwise his last one (which counts whatever it is). Lock when the score in hand beats that. Each call
   shows how many of his last 10 games beat the score and the chance a remaining game does.
 - **Opportunity cost**: the call is made for the team. Locking fills a slot, so it compares "this score plus the best
   fill of the other open slots" against "the best fill of all open slots with him still in the pool". A good-not-great
   score is held when a stronger player still to play needs that slot, and banked when slots are running out.
-- **Today's lineup**: after those locks, every open slot gets someone who plays today, chosen by how much having
-  today's game is worth to each player (the chance it becomes his best game). Players already in a slot stay put.
+- **Today's lineup**: after those locks, every open slot gets someone who plays today. When more play than there are open
+  slots, the slots go to the players whose game tonight is most likely to clear their lock target (expected points
+  above it). Players already in a slot stay put where possible.
 - **Your week**: each slot's player and his games (finished games with their score, the lockable one highlighted),
   then the bench. The projected total is your locked points plus the best expected fill of the open slots.
 - Sleeper doesn't publish which games you've locked, so you mark them with **I locked him in** (saved per league and

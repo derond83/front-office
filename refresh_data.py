@@ -508,6 +508,10 @@ def refresh_projections(sport):
             for k, v in st.items():
                 if k not in PROJ_SKIP and isinstance(v, (int, float)) and v:
                     p["s"][k] = round(p["s"].get(k, 0) + v, 2)
+            if sport == "nba":  # Lock-In leagues judge each game on its own: keep them apart too
+                p.setdefault("gm", []).append({"d": r.get("date"), "opp": r.get("opponent"), "gid": r.get("game_id"),
+                                               "s": {k: round(v, 2) for k, v in st.items()
+                                                     if k not in PROJ_SKIP and isinstance(v, (int, float)) and v}})
         if len(players) < 100:
             raise ValueError(f"only {len(players)} players projected for week {week}")
     except Exception as e:  # noqa: BLE001
@@ -517,6 +521,57 @@ def refresh_projections(sport):
                     {"season": season, "week": week, "updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),
                      "players": players})
     print(f"Projections: {sport} {season} week {week}, {len(players)} players -> {path.relative_to(HERE)}")
+
+
+# Box-score stats kept for each recent basketball game (any of them can be a scoring category).
+NBA_GAME_KEYS = ["pts", "reb", "oreb", "dreb", "ast", "stl", "blk", "to", "tpm", "tpa", "fgm", "fga", "ftm", "fta",
+                 "pf", "tf", "ff", "dd", "td", "bonus_pt_40p", "bonus_pt_50p", "bonus_reb_20p", "bonus_ast_15p"]
+NBA_RECENT = 10
+
+
+def refresh_nba_games():
+    """Each player's last 10 games, box score by box score, for Lock-In decisions ("how often does he beat this?").
+    Reads this season's weeks so far, then last season's final weeks until most players have 10 games."""
+    state = get(f"{SLEEPER}/state/nba")
+    season, week = lineup_week(state)
+    games = {}  # pid -> [[date, opp, team, *stats]] newest first
+
+    def take(season_, week_):
+        rows = get(f"https://api.sleeper.com/stats/nba/{season_}/{week_}?season_type=regular") or []
+        n = 0
+        for r in sorted(rows, key=lambda r: r.get("date") or "", reverse=True):
+            st = r.get("stats") or {}
+            if not st.get("gp") and not st.get("sp"):
+                continue  # did not play
+            g = games.setdefault(str(r["player_id"]), [])
+            if len(g) < NBA_RECENT and not any(x[0] == r.get("date") for x in g):
+                g.append([r.get("date"), r.get("opponent"), r.get("team")] + [st.get(k, 0) or 0 for k in NBA_GAME_KEYS])
+                n += 1
+        return n
+
+    try:
+        # This season, newest week first (the current week may be in progress; finished games count).
+        for w in range(week, 0, -1):
+            take(season, w)
+        # Then last season, from its last regular-season week back, until the rotation players have 10.
+        prev, fetched = season - 1, 0
+        for w in range(26, 0, -1):
+            enough = sum(1 for g in games.values() if len(g) >= NBA_RECENT)
+            if fetched and enough >= 300:
+                break
+            if take(prev, w):
+                fetched += 1
+            if fetched >= 6:
+                break
+        if sum(1 for g in games.values() if g) < 200:
+            raise ValueError(f"only {len(games)} players with recent games")
+    except Exception as e:  # noqa: BLE001
+        warn(f"NBA recent games: {e}")
+        return
+    path = write_js("nba/games.js", "window.NBA_GAMES",
+                    {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "keys": NBA_GAME_KEYS,
+                     "players": games})
+    print(f"Recent games: nba {len(games)} players -> {path.relative_to(HERE)}")
 
 
 def main():
@@ -553,6 +608,7 @@ def main():
         refresh_rankings()
         refresh_keeper()
         refresh_projections("nba")
+        refresh_nba_games()
 
     if warnings:
         print(f"\n{len(warnings)} source(s) failed; their last good data was kept.", file=sys.stderr)

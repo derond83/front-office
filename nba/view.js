@@ -44,6 +44,7 @@
     const view = viewOf(ctx.id);
     const locked = new Set((ctx.store.get("locked", []) || []).map(String));
     const opts = () => ({ ...A.DEFAULTS, ...(ctx.store.get("options", {}) || {}) });
+    const matchupMode = () => (opts().matchupMode === "all" ? "all" : "lockin");
     let result;
     // Trades take a moment to search; only when the Trades tab is open.
     const keeper = window.HB_KEEPER || null;
@@ -241,7 +242,10 @@
       const team = `<div class="field"><label for="team-${esc(ctx.id)}">Your team</label><select id="team-${esc(ctx.id)}" class="team-select" data-team>${DH.teamOptions(ctx.data, ctx.rosterId)}</select></div>`;
       const mine = result.me.active.concat(result.me.reserve);
       return `<div class="stack settings-tab">${DH.settingsHtml([
-        { title: "League", note: `Settings here apply to ${esc(ctx.data.league.name)} only and are saved in this browser.`, body: `<div class="pickers">${team}</div>` },
+        { title: "League", note: `Settings here apply to ${esc(ctx.data.league.name)} only.`, body: `<div class="pickers">${team}
+          <div class="field"><label for="mm-${esc(ctx.id)}">Matchup scoring</label><select id="mm-${esc(ctx.id)}" class="source-select" data-matchupmode>
+            ${[["lockin", "Lock-In (one game per slot)"], ["all", "Every game counts"]].map(([v, l]) => `<option value="${v}"${matchupMode() === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
+          <p class="small muted">Lock-In is Sleeper's standard basketball format: each starting slot counts one game a week, the one you lock in (or its last game). Choose "Every game counts" only if your league adds up all of a player's games.</p>` },
         { title: "Moves", note: "How waiver moves are judged.", body: DH.knobsHtml(ctx, MOVE_KNOBS, opts()) },
         { title: "Trades", note: "How trade ideas are judged.", body: `<div class="pickers"><div class="field"><label for="tv-${esc(ctx.id)}">Trade values</label>
             <select id="tv-${esc(ctx.id)}" class="source-select" data-tradevalues>${TRADE_VALUE_MODES.map(([v, l]) => `<option value="${v}"${opts().tradeValues === v ? " selected" : ""}>${l}</option>`).join("")}</select></div></div>
@@ -297,11 +301,14 @@
     function matchupHtml() {
       const pos = (id) => (ctx.data.players[id] && ctx.data.players[id].fantasy_positions) || [];
       const groups = (id) => [...new Set(pos(id).map((x) => A.POS_GROUP[x]).filter(Boolean))];
+      const fits = (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g));
+      // Sleeper basketball leagues score Lock-In by default (one game per slot per week).
+      if (matchupMode() === "lockin") return DH.lockinHtml(ctx, { chips: posChips, groupsOf: groups, fits });
       return DH.matchupHtml(ctx, {
         sport: "nba", chips: posChips, groupsOf: groups,
         fits: (id, slot) => pos(id).some((g) => (SLOT_POS[slot] || []).includes(g)),
         spread: (pts) => (pts > 0 ? 0.18 * pts + 3 : 0),
-        note: "A player's week is the sum of his games, so more games count. Sleeper basketball lineups lock game by game: check daily for starters without a game that day",
+        note: "Every game counts: a player's week is the sum of his games, so more games count",
       });
     }
     const tabs = DH.visibleTabs(TABS, result.rookieDraft, ctx.data.league);
@@ -320,6 +327,7 @@
     el.onchange = (e) => {
       const t = e.target;
       if (t.matches("[data-team]")) return ctx.setTeam(t.value);
+      if (t.matches("[data-matchupmode]")) { ctx.store.set("options", { ...(ctx.store.get("options", {}) || {}), matchupMode: t.value }); return ctx.rerender(); }
       if (t.matches("[data-tradevalues]")) { ctx.store.set("options", { ...(ctx.store.get("options", {}) || {}), tradeValues: t.value }); return ctx.rerender(); }
       if (t.matches("[data-sort]")) { view.wireSort = t.value; view.wireShown = null; return redrawPlayers(); }
     };

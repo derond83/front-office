@@ -164,5 +164,51 @@ for (const home of window.HOME_LEAGUES) {
   }
 }
 
+// ---------- Lock-In basketball ----------
+{
+  const LockIn = load("js/lockin.js");
+  const hist = (m) => [m + 8, m - 8, m, m + 4, m - 4, m + 12, m - 10, m, m + 3, m - 3];
+  const game = (date, state, extra) => ({ date, state, opp: "XXX", home: true, ...extra });
+  const solo = (x, left, extra = {}) => LockIn.plan({
+    slots: ["UTIL"], fits: () => true, today: "2026-10-22", optimize: Lineup.optimize,
+    players: { a: { hist: hist(30), slot: 0, ...extra, games: [game("2026-10-21", "done", { pts: x }),
+      ...Array.from({ length: left }, (_, k) => game(`2026-10-2${3 + k}`, "upcoming", { proj: 30 }))] } },
+  }).decisions[0];
+  test("lock-in: a big game with one game left is locked", () => assert.strictEqual(solo(45, 1).rec, "lock"));
+  test("lock-in: an ordinary game with three left is held", () => assert.strictEqual(solo(30, 3).rec, "hold"));
+  test("lock-in: no games left means lock", () => { const d = solo(12, 0); assert.strictEqual(d.rec, "lock"); assert.strictEqual(d.why, "last"); });
+  test("lock-in: hold value grows with games left", () => assert.ok(solo(30, 3).hold > solo(30, 1).hold));
+  test("lock-in: an injured player's later games are worth less", () => assert.ok(solo(30, 2, { injury: "Doubtful" }).hold < solo(30, 2).hold));
+  test("lock-in: chance to beat matches the recent-games count direction", () => assert.ok(solo(20, 2).pBeat > solo(40, 2).pBeat));
+
+  const team = LockIn.plan({
+    slots: ["UTIL"], fits: () => true, today: "2026-10-22", optimize: Lineup.optimize,
+    players: {
+      a: { hist: hist(30), slot: 0, games: [game("2026-10-21", "done", { pts: 34 }), game("2026-10-23", "upcoming", { proj: 30 }), game("2026-10-25", "upcoming", { proj: 30 })] },
+      b: { hist: hist(40), slot: null, games: [game("2026-10-24", "upcoming", { proj: 40 })] },
+    },
+  });
+  test("lock-in: holds a slot for a better player still to play", () => {
+    const d = team.decisions[0];
+    assert.strictEqual(d.own, "lock"); assert.strictEqual(d.rec, "hold"); assert.strictEqual(d.instead, "b");
+  });
+
+  const locked = LockIn.plan({
+    slots: ["G", "F"], fits: (id, s) => ({ g: ["G"], f: ["F"], f2: ["F"] })[id].includes(s), today: "2026-10-22", optimize: Lineup.optimize,
+    locks: { 0: { pid: "g", pts: 41 } },
+    players: {
+      g: { hist: hist(30), slot: 0, games: [game("2026-10-20", "done", { pts: 41 }), game("2026-10-22", "upcoming", { proj: 30 })] },
+      f: { hist: hist(25), slot: 1, games: [game("2026-10-24", "upcoming", { proj: 25 })] },
+      f2: { hist: hist(25), slot: null, games: [game("2026-10-22", "upcoming", { proj: 25 })] },
+    },
+  });
+  test("lock-in: locked slots count their score and stay out of today's lineup", () => {
+    assert.strictEqual(locked.lockedPts, 41);
+    assert.ok(!locked.today.lineup[0], "a locked slot isn't refilled");
+    assert.strictEqual(locked.today.lineup[1], "f2", "the open slot goes to the player who plays today");
+    assert.ok(locked.projected.total > 41);
+  });
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

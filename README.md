@@ -192,6 +192,31 @@ Questionable 85%; football players on bye count 0. A basketball player's week is
 - **Before kickoff** (basketball: before games lock): your questionable or doubtful starters, and toss-ups between a
   starter and a bench player within a point.
 
+### Basketball: Lock-In leagues
+
+Sleeper's standard basketball format is **Lock-In**: each starting slot counts **one game a week**. After a starter's
+game you can lock it in, until his next game tips off; a locked player can't move slots, bench games can't be locked,
+and a slot left open counts its last game, even a zero. The Matchup tab handles this by default (Settings → Matchup
+scoring switches to "Every game counts" for leagues that add up all games). `js/lockin.js` does the deciding:
+
+- **A player's next game** is modelled from his last 10 games scored with the league's settings, nudged by
+  Sleeper's projection for that game (opponent, home/away, minutes; half weight, within ±25%), with a chance he
+  doesn't play: 95% healthy, 75% day-to-day, 60% questionable, 25% doubtful, 0 out.
+- **Lock or hold** is optimal stopping. Holding is worth the expected result of taking the best of his remaining
+  games and otherwise his last one (which counts whatever it is). Lock when the score in hand beats that. Each call
+  shows how many of his last 10 games beat the score and the chance a remaining game does.
+- **Opportunity cost**: the call is made for the team. Locking fills a slot, so it compares "this score plus the best
+  fill of the other open slots" against "the best fill of all open slots with him still in the pool". A good-not-great
+  score is held when a stronger player still to play needs that slot, and banked when slots are running out.
+- **Today's lineup**: after those locks, every open slot gets someone who plays today, chosen by how much having
+  today's game is worth to each player (the chance it becomes his best game). Players already in a slot stay put.
+- **Your week**: each slot's player and his games (finished games with their score, the lockable one highlighted),
+  then the bench. The projected total is your locked points plus the best expected fill of the open slots.
+- Sleeper doesn't publish which games you've locked, so you mark them with **I locked him in** (saved per league and
+  week, and synced). The opponent's projection assumes they lock well from here.
+- Data: this week's schedule and box scores load live from Sleeper (`api.sleeper.com`); recent games
+  (`data/nba/games.js`) and per-game projections (`data/nba/proj.js`) are refreshed twice a day.
+
 Projections are refreshed twice a day (6 AM and noon Eastern).
 
 ## Ideas for later

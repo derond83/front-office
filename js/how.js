@@ -50,6 +50,9 @@
       <p><strong>Matchup</strong> shows up during the season. Switch between your <strong>optimal</strong> lineup (best by projections) and
         your <strong>current</strong> Sleeper lineup, with a win chance against this week's opponent. Players tagged <em>Start</em> or
         <em>Sit</em> are the changes to make, and <em>Before kickoff</em> lists questionable starters and close calls.</p>
+      <p><strong>Basketball Lock-In</strong> (Sleeper's standard format, where each slot counts one game a week): after each game it
+        says <em>Lock</em> or <em>Hold</em> for every starter, from how often his last 10 games beat that score, his games left and
+        what your other players could still put in the slot. It also says who to start today so no game goes to waste.</p>
       <p class="small muted">Injured players count less: questionable at 85%, doubtful at 25%, out at 0.</p>`)}
 
     ${card("Settings and locks", `

@@ -205,23 +205,25 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
 - **Today's checklist** (top of the tab) is the daily routine, in order: **Lock** (with the score and its target),
   **Start** (bench players to move in, and where), **Bench** (starters with no game today, or whose game matters less),
   **Hold** (starters to leave unlocked).
-- **Lock target**: the score at which locking is worth as much to the week as holding the slot open. It's the larger of
-  what the player is expected to beat later and what the best bench player who'd otherwise take that slot is worth.
-  Lock at or above it. Settings → **Lock-in cushion** (0–10 points, default 0) locks anything within that many points
-  of the target, for banking games earlier. "Lock tonight if" in Today's lineup is each starter's target for tonight's
-  game, with his chance of reaching it.
+- **Lock target**: the score at which locking now and holding come out even for your week. It comes from simulating
+  the rest of the week 400 times on the real schedule (the same simulated games for both choices, so the comparison
+  is fair): only open slots take a game, one player per slot per night, positions before UTIL, each player locks a
+  game that beats what his own remaining games are worth, and an unlocked slot ends with its player's final game. So
+  each player gets his own target: his form and games left, how crowded your nights are, and what the slot is worth
+  to the rest of your roster. Lock at or above it. Settings → **Lock-in cushion** (0–10 points, default 0) locks
+  anything within that many points of the target. "Lock tonight if" in Today's lineup is each starter's target for
+  tonight's game, with his chance of reaching it. The projected total and win chance come from the same simulation.
 - **Lock or hold** is optimal stopping. Holding is worth the expected result of taking the best of his remaining
   games and otherwise his last one (which counts whatever it is). Lock when the score in hand beats that. Each call
   shows how many of his last 10 games beat the score and the chance a remaining game does.
-- **Opportunity cost**: the call is made for the team. Locking fills a slot, so it compares "this score plus the best
-  fill of the other open slots" against "the best fill of all open slots with him still in the pool". A good-not-great
-  score is held when a stronger player still to play needs that slot, and banked when slots are running out.
+- **Opportunity cost** is part of the simulation: locking closes a slot for the rest of the week. A good-not-great score
+  is held when your other players are likely to need that slot, and banked when there's room.
 - **UTIL last**: UTIL takes any position, so it's kept open longest. A lock call for a player sitting in UTIL says to
   move him into an open G/F/C slot he fits first, then lock there; and today's lineup seats players in their positions
   before UTIL.
 - **Today's lineup**: after those locks, every open slot gets someone who plays today. When more play than there are open
-  slots, the slots go to the players whose game tonight is most likely to clear their lock target (expected points
-  above it). Players already in a slot stay put where possible.
+  slots, the slots go to the players whose game tonight is worth most above their lock target (a steady player with
+  games left gains little from tonight; a volatile one can gain a lot). Players already in a slot stay put where possible.
 - **Your week**: each slot's player and his games (finished games with their score, the lockable one highlighted),
   then the bench. The projected total is your locked points plus the best expected fill of the open slots.
 - Sleeper doesn't publish which games you've locked, so you mark them with **I locked him in** (saved per league and

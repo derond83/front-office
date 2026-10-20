@@ -232,5 +232,28 @@ for (const home of window.HOME_LEAGUES) {
   });
 }
 
+{
+  // A deep bench must not flatten every player's target to the same number.
+  const LockIn = load("js/lockin.js");
+  const g = (date, state, extra) => ({ date, state, opp: "XXX", home: true, ...extra });
+  const h = (m, sp) => [m + sp, m - sp, m, m + sp / 2, m - sp / 2, m + sp, m - sp, m, m + 2, m - 2];
+  const players = {};
+  const means = [45, 38, 30, 26, 34, 32, 28, 36];
+  means.forEach((m, k) => {
+    players["p" + k] = { hist: h(m, 4 + k), slot: k < 4 ? k : null, games: [
+      ...(k < 4 ? [g("2026-10-21", "done", { pts: m })] : []),
+      g(`2026-10-2${2 + (k % 3)}`, "upcoming", { proj: m }), g("2026-10-25", "upcoming", { proj: m })] };
+  });
+  const plan = LockIn.plan({ slots: ["UTIL", "UTIL", "UTIL", "UTIL"], fits: () => true, today: "2026-10-22", players });
+  test("lock-in: targets differ by player on a deep roster", () => {
+    const t = plan.decisions.map((d) => Math.round(d.target));
+    assert.ok(new Set(t).size >= 3, `targets ${t.join(", ")}`);
+  });
+  test("lock-in: a better player gets a higher target", () => {
+    const by = Object.fromEntries(plan.decisions.map((d) => [d.pid, d.target]));
+    assert.ok(by.p0 > by.p3, `p0 ${by.p0.toFixed(1)} vs p3 ${by.p3.toFixed(1)}`);
+  });
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

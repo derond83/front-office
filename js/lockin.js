@@ -1,21 +1,25 @@
 // Lock-In basketball (Sleeper's default NBA format): each starting slot counts ONE game a week. After a
 // starter's game you may lock it in, until his next game starts; a locked player can't move slots; an
-// unlocked slot counts its last game, even a zero. This decides when to lock and whom to start each day.
-// No DOM.
+// unlocked starter counts his final game of the week, even a zero. This decides when to lock and whom to
+// start each day. No DOM.
 //
 // A player's next game is modelled from his recent games (last 10 by default, scored with the league's
 // settings), nudged by Sleeper's projection for that game (opponent, home/away, minutes), with a chance
-// he doesn't play at all (injury, rest). Lock decisions are optimal stopping: lock when the score in
-// hand beats what holding is expected to end with, where holding means taking the best of his later
-// games and, failing that, his final game (which counts whatever it is). The team view adds the
-// opportunity cost: locking uses up a slot your other players could still fill.
+// he doesn't play at all (injury, rest).
+//
+// Lock targets come from simulating the rest of the week a few hundred times, night by night on the real
+// schedule: only open slots can take a game, one player per slot per night, players go in their
+// positions before UTIL, each player locks when a game beats what he can expect from his own remaining
+// games, and an unlocked slot ends with its player's final game. A player's target is the score where
+// "lock it now" and "hold" come out even over those simulated weeks, so it reflects his own games left
+// and form, how crowded your nights are, and what the slot is worth to the rest of your roster.
 (function (root) {
   "use strict";
 
   // Chance a player suits up for a game, by Sleeper injury designation.
   const PLAYS = { Out: 0, IR: 0, Sus: 0, NA: 0, DNR: 0, COV: 0, Doubtful: 0.25, Questionable: 0.6, GTD: 0.75, DTD: 0.75 };
   const HEALTHY = 0.95; // rest days and late scratches
-  const DEFAULTS = { nHist: 10, matchupWeight: 0.5, minHist: 4 };
+  const DEFAULTS = { nHist: 10, matchupWeight: 0.5, minHist: 4, runs: 400, seed: 20261020 };
 
   const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 
@@ -41,7 +45,6 @@
   const expected = (d) => d.reduce((s, x) => s + x.v * x.p, 0);
   const expMax = (d, h) => d.reduce((s, x) => s + Math.max(x.v, h) * x.p, 0);
   const cdf = (d, x) => d.reduce((s, y) => s + (y.v <= x ? y.p : 0), 0);
-  const sd = (d) => { const m = expected(d); return Math.sqrt(d.reduce((s, x) => s + x.p * (x.v - m) ** 2, 0)); };
 
   /** Expected final score from holding through these upcoming games (in order); the last one is forced. */
   function holdValue(dists) {
@@ -52,6 +55,17 @@
   }
   /** Chance at least one of these games scores more than x. */
   const beatChance = (dists, x) => 1 - dists.reduce((s, d) => s * cdf(d, x), 1);
+
+  // Small seeded generator, so the same data always gives the same advice.
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function sample(d, u) {
+    let c = 0;
+    for (const x of d) { c += x.p; if (u < c) return x.v; }
+    return d[d.length - 1].v;
+  }
 
   /**
    * o: {
@@ -65,13 +79,14 @@
    *   } },
    *   locks: { slotIndex: { pid, pts } },  games already locked in
    *   today: "YYYY-MM-DD",
-   *   optimize(slots, ids, fits, pts) -> pid per slot   (LineupEngine.optimize)
+   *   cushion: points                      lock when within this many points of the target
    * }
    */
   function plan(o) {
     const cfg = { ...DEFAULTS, ...(o.cfg || {}) };
-    const cushion = Math.max(0, Number(o.cushion) || 0); // lock when within this many points of the target
+    const cushion = Math.max(0, Number(o.cushion) || 0);
     const lockedPids = new Set(Object.values(o.locks || {}).map((l) => String(l.pid)));
+    const S = o.slots.length;
     const openIdx = o.slots.map((_, i) => i).filter((i) => !(o.locks || {})[i]);
     const info = {};
 
@@ -82,70 +97,119 @@
       const upcoming = games.filter((g) => g.state === "upcoming");
       // Later games are less likely to be hit by today's injury news.
       const dists = upcoming.map((g, k) => gameDist(p.hist || [], g.proj ?? null, k === 0 ? play : Math.max(play, 0.85), cfg));
-      const hold = holdValue(dists);
+      // holdFrom[k]: what holding is worth standing before upcoming game k (null once none are left).
+      const holdFrom = dists.map((_, k) => holdValue(dists.slice(k))).concat([null]);
       // A finished game can still be locked until his next game starts.
       const doneIdx = games.map((g, i) => (g.state === "done" ? i : -1)).filter((i) => i >= 0);
       const lastDone = doneIdx.length ? doneIdx[doneIdx.length - 1] : -1;
       const next = games[lastDone + 1];
       const candidate = lastDone >= 0 && (!next || next.state === "upcoming") ? games[lastDone] : null;
-      const value = candidate ? (hold == null ? candidate.pts : Math.max(candidate.pts, hold)) : hold || 0;
-      const todayGame = games.find((g) => g.date === o.today && g.state === "upcoming") || null;
-      const sdGame = dists.length ? sd(dists[0]) : 0;
-      info[pid] = { pid, play, games, upcoming, dists, hold, candidate, value, todayGame, sdGame, slot: p.slot, hist: (p.hist || []).slice(0, cfg.nHist) };
+      const todayGame = upcoming.find((g) => g.date === o.today) || null;
+      info[pid] = { pid, play, games, upcoming, dists, hold: holdFrom[0], holdFrom, means: dists.map(expected), candidate,
+        todayGame, slot: p.slot, hist: (p.hist || []).slice(0, cfg.nHist) };
     }
-
     const pool = Object.keys(info);
-    const assign = (slotIdx, ids, val) => {
-      if (!slotIdx.length || !ids.length) return { total: 0, by: [] };
-      const by = o.optimize(slotIdx.map((i) => o.slots[i]), ids, o.fits, (id) => val(id));
-      return { total: by.reduce((s, id) => s + (id ? val(id) : 0), 0), by };
-    };
-    const valueOf = (id) => info[id].value;
-    // How many of your players each slot can take: UTIL takes anyone, so it's the one to keep open longest.
+    const ids = pool;
+    const P = ids.length;
+    const ix = Object.fromEntries(ids.map((id, i) => [id, i]));
+
+    // Slots: how many of your players each one can take (UTIL takes anyone: keep it for last).
     const allIds = Object.keys(o.players);
     const flex = o.slots.map((sl) => allIds.filter((id) => o.fits(id, sl)).length);
-    const maxFlex = Math.max(1, ...flex);
+    const fitsIx = ids.map((id) => o.slots.map((sl) => o.fits(id, sl)));
+    const narrowFirst = o.slots.map((_, i) => i).sort((a, b) => flex[a] - flex[b]);
     const occupant = {};
     for (const id of pool) if (info[id].slot != null) occupant[info[id].slot] = id;
-    /** Seat every id in a distinct slot, maximizing the sum of pref(id, slot) (exact; slots are few). */
-    function seat(slotIdx, ids, pref) {
-      const S = slotIdx.length, size = 1 << S;
-      let dp = new Map([[0, { v: 0, seats: [] }]]);
-      for (const id of ids) {
-        const next = new Map();
-        for (const [mask, st] of dp) for (let k = 0; k < S; k++) {
-          if (mask & (1 << k) || !o.fits(id, o.slots[slotIdx[k]])) continue;
-          const nm = mask | (1 << k), v = st.v + pref(id, slotIdx[k]);
-          if (!next.has(nm) || next.get(nm).v < v) next.set(nm, { v, seats: st.seats.concat([[slotIdx[k], id]]) });
-        }
-        if (!next.size) return null;
-        dp = next;
-      }
-      let best = null;
-      for (const st of dp.values()) if (!best || st.v > best.v) best = st;
-      return best && size ? Object.fromEntries(best.seats) : {};
-    }
-    const lockedPts = Object.values(o.locks || {}).reduce((s, l) => s + (Number(l.pts) || 0), 0);
-    const best = assign(openIdx, pool, valueOf);
 
-    // Where to lock a player: before locking you can move him to any open starting slot he fits (its
-    // occupant swaps into his old one). Pick the slot that costs the rest of the week least; on a tie, the
-    // narrowest one, so UTIL stays open for whoever needs it later.
-    function bestLockSlot(id, open, others, taken = new Set()) {
-      const from = info[id].slot;
-      // Another slot of the same kind gains nothing; only a different, narrower slot is worth a move.
-      const options = open.filter((i) => !taken.has(i) && o.fits(id, o.slots[i]) &&
-        (i === from || from == null || (o.slots[i] !== o.slots[from] && (!occupant[i] || o.fits(occupant[i], o.slots[from])))));
-      if (from != null && taken.has(from)) {
-        const twin = open.find((i) => !taken.has(i) && o.slots[i] === o.slots[from]);
-        if (twin != null) options.push(twin);
+    // Nights left this week, in order.
+    const days = [...new Set(pool.flatMap((id) => info[id].upcoming.map((g) => g.date)))].sort();
+    const gameOn = ids.map((id) => days.map((d) => info[id].upcoming.findIndex((g) => g.date === d)));
+
+    // Pre-drawn outcomes, shared by every variant (paired comparisons, little noise).
+    const R = cfg.runs, rand = rng(cfg.seed);
+    const draws = Array.from({ length: R }, () => ids.map((id) => info[id].dists.map((d) => sample(d, rand()))));
+
+    /**
+     * Expected rest-of-week points from the open slots under the policy, for one variant:
+     *   drop: pid        he doesn't lock his finished game (hold)
+     *   lockNow: { pid, slot }   he locks now (his points are counted outside; slot closed, he's gone)
+     *   forced: { slot: pid }    locks you're making this morning (counted outside)
+     *   tonight: { pid, mode: "hold" | "lock" }   he starts tonight; "hold" = tonight's game won't be locked,
+     *                    "lock" = tonight's game is locked (counted outside: only the rest is measured)
+     */
+    function simulate(v = {}) {
+      let sum = 0, sum2 = 0;
+      const open0 = new Array(S).fill(false);
+      for (const i of openIdx) open0[i] = true;
+      const removed0 = new Array(P).fill(false);
+      const close = (open, i) => { if (i != null) open[i] = false; };
+      if (v.lockNow) { close(open0, v.lockNow.slot); removed0[ix[v.lockNow.pid]] = true; }
+      for (const [s, id] of Object.entries(v.forced || {})) { close(open0, Number(s)); if (id in ix) removed0[ix[id]] = true; }
+      const tIx = v.tonight ? ix[v.tonight.pid] : -1;
+      for (let r = 0; r < R; r++) {
+        const open = open0.slice(), gone = removed0.slice();
+        const cand = ids.map((id, p) => (info[id].candidate && !gone[p] && id !== v.drop ? info[id].candidate.pts : null));
+        const k = new Array(P).fill(0);
+        // Each open slot's last game: [player, points]. Starters who already played hold theirs.
+        const last = new Array(S).fill(null);
+        for (let p = 0; p < P; p++) if (cand[p] != null && info[ids[p]].slot != null && open[info[ids[p]].slot]) last[info[ids[p]].slot] = [p, cand[p]];
+        let total = 0;
+        const lockInto = (p) => {
+          for (const i of narrowFirst) if (open[i] && fitsIx[p][i]) { open[i] = false; gone[p] = true; for (let s = 0; s < S; s++) if (last[s] && last[s][0] === p) last[s] = null; return i; }
+          return -1;
+        };
+        for (let d = 0; d < days.length; d++) {
+          // Morning: lock anything that beats what his own remaining games are worth (or his last game).
+          const order = [];
+          for (let p = 0; p < P; p++) if (!gone[p] && cand[p] != null) order.push(p);
+          order.sort((a, b) => cand[b] - cand[a]);
+          for (const p of order) {
+            const h = info[ids[p]].holdFrom[k[p]];
+            if (h == null || cand[p] >= h) { const i = lockInto(p); if (i >= 0) total += cand[p]; }
+          }
+          // Evening: seat tonight's players in open slots, best first, positions before UTIL.
+          const playing = [];
+          for (let p = 0; p < P; p++) if (!gone[p] && gameOn[p][d] >= 0) playing.push(p);
+          playing.sort((a, b) => (b === tIx && d === 0) - (a === tIx && d === 0) || info[ids[b]].means[gameOn[b][d]] - info[ids[a]].means[gameOn[a][d]]);
+          const used = new Array(S).fill(false);
+          for (const p of playing) {
+            const g = gameOn[p][d];
+            let seat = -1;
+            for (const i of narrowFirst) if (open[i] && !used[i] && fitsIx[p][i]) { seat = i; break; }
+            const x = draws[r][p][g];
+            k[p] = g + 1;
+            if (seat < 0) { cand[p] = null; continue; }
+            used[seat] = true;
+            for (let s = 0; s < S; s++) if (last[s] && last[s][0] === p) last[s] = null;
+            last[seat] = [p, x];
+            cand[p] = x;
+            if (d === 0 && p === tIx) {
+              if (v.tonight.mode === "lock") { open[seat] = false; gone[p] = true; last[seat] = null; cand[p] = null; }
+              else cand[p] = null; // passes on tonight's game (it still counts if it turns out to be his last in the slot)
+            }
+          }
+        }
+        // End of the week: each open slot counts its player's final game.
+        for (let s = 0; s < S; s++) if (open[s] && last[s]) total += last[s][1];
+        sum += total; sum2 += total * total;
       }
-      let best = from, bestV = -Infinity;
-      for (const i of options) {
-        const v = assign(open.filter((j) => j !== i && !taken.has(j)), others, valueOf).total - 0.05 * flex[i] / maxFlex;
-        if (v > bestV + 1e-9) { bestV = v; best = i; }
+      const m = sum / R;
+      return { mean: m, sd: Math.sqrt(Math.max(0, sum2 / R - m * m)) };
+    }
+
+    const lockedPts = Object.values(o.locks || {}).reduce((s, l) => s + (Number(l.pts) || 0), 0);
+
+    // Where to lock a player: before locking you can move him to an open slot he fits of a different kind
+    // (its occupant swaps into his old one). Positions before UTIL; among those, the narrowest.
+    function lockSlotFor(id, taken) {
+      const from = info[id].slot, p = ix[id];
+      const ok = (i) => openIdx.includes(i) && !taken.has(i) && fitsIx[p][i];
+      if (from != null && ok(from)) {
+        const better = narrowFirst.find((i) => ok(i) && flex[i] < flex[from] && o.slots[i] !== o.slots[from] && (!occupant[i] || o.fits(occupant[i], o.slots[from])));
+        return better != null ? better : from;
       }
-      return best;
+      const twin = from != null ? narrowFirst.find((i) => ok(i) && o.slots[i] === o.slots[from]) : undefined;
+      return twin != null ? twin : narrowFirst.find(ok) ?? from;
     }
 
     // ---- Lock decisions: starters in an open slot with a finished game still lockable.
@@ -155,31 +219,28 @@
       if (!c || p.slot == null || !openIdx.includes(p.slot)) continue;
       const x = c.pts;
       const beatHist = p.hist.filter((v) => v > x).length;
-      const base = { pid: id, slot: p.slot, game: c, x, hold: p.hold, left: p.upcoming.length, beatHist, nHist: p.hist.length };
-      if (p.hold == null) { decisions.push({ ...base, lockSlot: p.slot, rec: "lock", why: "last", pBeat: 0, target: 0 }); continue; }
+      const lockSlot = lockSlotFor(id, new Set());
+      const base = { pid: id, slot: p.slot, lockSlot, game: c, x, hold: p.hold, left: p.upcoming.length, beatHist, nHist: p.hist.length };
+      if (p.hold == null) { decisions.push({ ...base, rec: "lock", why: "last", pBeat: 0, target: 0 }); continue; }
       const pBeat = beatChance(p.dists, x);
-      // Team view. Lock: x in this slot, the others fill the other open slots. Hold: he stays in the pool.
-      // The lock target is the score where the two come out even; lock at or above it (less the cushion).
-      const others = pool.filter((q) => q !== id);
-      const lockSlot = bestLockSlot(id, openIdx, others);
-      const locked = assign(openIdx.filter((i) => i !== lockSlot), others, valueOf);
-      const held = assign(openIdx, pool, (q) => (q === id ? p.hold : valueOf(q)));
-      const target = Math.max(0, held.total - locked.total);
+      const held = simulate({ drop: id }).mean;
+      const rest = simulate({ lockNow: { pid: id, slot: lockSlot } }).mean;
+      const target = Math.max(0, held - rest);
       const own = x >= p.hold ? "lock" : "hold";
       const rec = x >= target - cushion ? "lock" : "hold";
-      // Holding for someone else: the player who'd lose out on a slot if you locked now.
-      const lockSet = new Set(locked.by);
-      const instead = rec === "hold" && own === "lock" ? held.by.find((q) => q && q !== id && !lockSet.has(q)) || null : null;
       const close = rec === "lock" && x < target;
-      decisions.push({ ...base, lockSlot, rec, own, pBeat, target, close, why: close ? "cushion" : rec === own ? "odds" : "slots", instead });
+      // When the slot is what's being saved: the bench player most likely to use it.
+      const instead = rec === "hold" && own === "lock"
+        ? pool.filter((q) => q !== id && info[q].upcoming.length && o.fits(q, o.slots[p.slot]))
+          .sort((a, b) => (info[b].hold || 0) - (info[a].hold || 0))[0] || null : null;
+      decisions.push({ ...base, rec, own, pBeat, target, close, why: close ? "cushion" : rec === own ? "odds" : "slots", instead });
     }
     decisions.sort((a, b) => (a.rec === b.rec ? b.x - a.x : a.rec === "lock" ? -1 : 1));
     // Two locks can't share a slot: settle them biggest score first.
     {
-      const taken = new Set(), lockIds = new Set(decisions.filter((d) => d.rec === "lock").map((d) => d.pid));
+      const taken = new Set();
       for (const d of decisions.filter((x) => x.rec === "lock")) {
-        if (taken.has(d.lockSlot)) d.lockSlot = bestLockSlot(d.pid, openIdx, pool.filter((q) => !lockIds.has(q)), taken);
-        if (taken.has(d.lockSlot)) d.lockSlot = d.slot;
+        if (taken.has(d.lockSlot)) d.lockSlot = lockSlotFor(d.pid, taken);
         d.moveFrom = d.lockSlot !== d.slot ? d.slot : null;
         d.swapWith = d.moveFrom != null ? occupant[d.lockSlot] || null : null;
         taken.add(d.lockSlot);
@@ -188,39 +249,29 @@
 
     // ---- Today's lineup. Slots you're about to lock (per the calls above) aren't open for today.
     const lockingNow = new Map(decisions.filter((d) => d.rec === "lock").map((d) => [d.lockSlot, d.pid]));
+    const forced = Object.fromEntries(lockingNow);
     const openToday = openIdx.filter((i) => !lockingNow.has(i));
     const lockingIds = new Set(lockingNow.values());
-    // A player's target tonight: the score that would make locking him after tonight's game worth more
-    // than holding (his later games, or the bench player who'd otherwise get the slot).
+    // Each of tonight's players: the score that would make locking tonight's game worth it, and what having
+    // tonight's game is worth (its expected points above that target).
     const tonight = {};
     for (const id of pool) {
       const p = info[id];
-      if (!p.todayGame || lockingIds.has(id)) continue;
-      const k = p.upcoming.indexOf(p.todayGame);
-      const after = holdValue(p.dists.slice(k + 1));
-      const d = p.dists[k];
-      if (after == null) { tonight[id] = { target: 0, last: true, option: expected(d) }; continue; }
-      const others = pool.filter((q) => q !== id && !lockingIds.has(q));
-      const fitting = openToday.filter((i) => o.fits(id, o.slots[i]));
-      if (!fitting.length) continue;
-      const lockedT = Math.max(...fitting.map((i) => assign(openToday.filter((j) => j !== i), others, valueOf).total));
-      const heldT = assign(openToday, others.concat(id), (q) => (q === id ? after : valueOf(q))).total;
-      const target = Math.max(0, heldT - lockedT);
-      // Having tonight's game is worth what it could add above that target.
-      tonight[id] = { target, option: d.reduce((s, x) => s + Math.max(0, x.v - target) * x.p, 0), dist: d, left: p.upcoming.length - k - 1 };
+      if (!p.todayGame || lockingIds.has(id) || !openToday.some((i) => o.fits(id, o.slots[i]))) continue;
+      const kk = p.upcoming.indexOf(p.todayGame), d = p.dists[kk];
+      if (p.holdFrom[kk + 1] == null) { tonight[id] = { target: 0, last: true, option: expected(d), dist: d }; continue; }
+      const held = simulate({ forced, tonight: { pid: id, mode: "hold" } }).mean;
+      const rest = simulate({ forced, tonight: { pid: id, mode: "lock" } }).mean;
+      const target = Math.max(0, held - rest);
+      tonight[id] = { target, option: d.reduce((s, x) => s + Math.max(0, x.v - target) * x.p, 0), dist: d, left: p.upcoming.length - kk - 1 };
     }
-    const option = Object.fromEntries(Object.entries(tonight).map(([id, t]) => [id, t.option]));
-    const playing = Object.keys(option);
-    const chosen = assign(openToday, playing, (id) => option[id] + 1e-3).by.filter(Boolean);
-    // Seat them in their positions before UTIL (a lock-worthy game then locks in a G/F/C slot and UTIL stays
-    // flexible), and otherwise leave players where they are.
-    const lineup = seat(openToday, chosen, (id, i) => (info[id].slot === i ? 0.3 : 0) - flex[i] / maxFlex) || {};
-    const startNow = Object.entries(lineup).map(([i, id]) => ({ slot: Number(i), pid: id, option: option[id], already: info[id].slot === Number(i) }));
+    // Who gets tonight's open slots: the most to gain, seated in their positions before UTIL, else left in place.
+    const chosen = pickSeats(openToday, Object.keys(tonight), (id) => tonight[id].option + 1e-3);
+    const lineup = seat(openToday, chosen, (id, i) => (info[id].slot === i ? 0.3 : 0) - flex[i] / Math.max(1, ...flex)) || {};
+    const startNow = Object.entries(lineup).map(([i, id]) => ({ slot: Number(i), pid: id, option: tonight[id].option, already: info[id].slot === Number(i) }));
     const placed = new Set(Object.values(lineup));
-    const benchPlaying = playing.filter((id) => !placed.has(id)).sort((a, b) => option[b] - option[a]);
+    const benchPlaying = Object.keys(tonight).filter((id) => !placed.has(id)).sort((a, b) => tonight[b].option - tonight[a].option);
     const idleInSlot = openToday.filter((i) => !lineup[i]);
-
-    // ---- Tonight's targets for the players starting today.
     const targets = {};
     for (const id of Object.values(lineup)) {
       const t = tonight[id];
@@ -229,13 +280,50 @@
       targets[id] = { target: t.target, lockAt, pReach: 1 - cdf(t.dist, lockAt), left: t.left };
     }
 
-    // ---- Projected final: locked points plus the best expected fill of the open slots.
-    const sdTotal = Math.sqrt(best.by.reduce((s, id) => s + (id ? (0.6 * info[id].sdGame) ** 2 : 0), 0));
+    // ---- Projected final: locked points, today's locks, and the simulated rest of the week.
+    const forcedPts = decisions.filter((d) => d.rec === "lock").reduce((s, d) => s + d.x, 0);
+    const restOfWeek = simulate({ forced });
+    // A rough value per player for display: his lockable score or what holding is worth, whichever is more.
+    for (const id of pool) {
+      const p = info[id];
+      p.value = p.candidate ? (p.hold == null ? p.candidate.pts : Math.max(p.candidate.pts, p.hold)) : p.hold || 0;
+    }
     return {
       info, openIdx, decisions, lockedPts,
-      today: { lineup, startNow, benchPlaying, idleInSlot, option, openToday, lockingNow: Object.fromEntries(lockingNow), targets },
-      projected: { locked: lockedPts, open: best.total, total: lockedPts + best.total, sd: sdTotal, fill: best.by.map((id, k) => ({ slot: openIdx[k], pid: id })) },
+      today: { lineup, startNow, benchPlaying, idleInSlot, openToday, lockingNow: forced, targets, tonight },
+      projected: { locked: lockedPts, open: forcedPts + restOfWeek.mean, total: lockedPts + forcedPts + restOfWeek.mean, sd: restOfWeek.sd },
     };
+
+    /** Pick up to |slots| players for these slots maximizing the sum of val (exact assignment over slots). */
+    function pickSeats(slotIdx, cands, val) {
+      const best = seat(slotIdx, [], () => 0);
+      // Greedy by value with a feasibility check; slots are few, so try adding in value order.
+      const order = cands.slice().sort((a, b) => val(b) - val(a));
+      let picked = [];
+      for (const id of order) {
+        if (picked.length >= slotIdx.length) break;
+        if (seat(slotIdx, picked.concat(id), () => 0)) picked = picked.concat(id);
+      }
+      return best ? picked : [];
+    }
+    /** Seat every id in a distinct slot, maximizing the sum of pref(id, slot); null if they can't all fit. */
+    function seat(slotIdx, list, pref) {
+      const n = slotIdx.length;
+      let dp = new Map([[0, { v: 0, seats: [] }]]);
+      for (const id of list) {
+        const next = new Map();
+        for (const [mask, st] of dp) for (let j = 0; j < n; j++) {
+          if (mask & (1 << j) || !o.fits(id, o.slots[slotIdx[j]])) continue;
+          const nm = mask | (1 << j), val = st.v + pref(id, slotIdx[j]);
+          if (!next.has(nm) || next.get(nm).v < val) next.set(nm, { v: val, seats: st.seats.concat([[slotIdx[j], id]]) });
+        }
+        if (!next.size) return null;
+        dp = next;
+      }
+      let best = null;
+      for (const st of dp.values()) if (!best || st.v > best.v) best = st;
+      return Object.fromEntries(best.seats);
+    }
   }
 
   const api = { plan, gameDist, holdValue, beatChance, expected, PLAYS, DEFAULTS };

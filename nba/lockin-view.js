@@ -175,7 +175,10 @@
     for (const id of outs) {
       const d = holdNow.find((x) => x.pid === id);
       const plays = P.info[id] && P.info[id].todayGame;
-      const reason = plays ? "plays today, but the others' games matter more this week" : "no game today";
+      const tn = T.tonight[id];
+      const reason = !plays ? "no game today"
+        : tn && !tn.last ? `plays today, but starting him tonight adds only about ${f1(tn.option)} to your week (target ${f1(tn.target)}, ${tn.left} game${tn.left === 1 ? "" : "s"} left after); the open slots go to players who add more`
+        : "plays today, but the others' games tonight matter more";
       const why = d ? `don't lock ${f1(d.x)} (target ${f1(d.target)}); ${reason}` : reason;
       todo.push(`<li class="todo"><span class="rec rec-sit">Bench</span><span>${who(id)} <span class="small muted">${why}</span></span></li>`);
     }
@@ -219,17 +222,16 @@
       const move = id === cur ? '<span class="tag fit">Set</span>' : `<span class="tag warn">Start</span>${cur ? ` <span class="small muted">over ${esc(pname(cur))}</span>` : ""}`;
       const t = T.targets[id];
       const tgt = !t ? "" : t.last ? '<span class="small">Last game: counts as is</span>'
-        : `<b>${f1(t.lockAt)}+</b> <span class="small muted">${t.pReach < 0.05 ? "unlikely" : `${pct(t.pReach)} chance`}</span>`;
+        : `<b>${f1(t.lockAt)}+</b> <span class="small muted">${t.pReach < 0.05 ? "unlikely" : `${pct(t.pReach)} chance`} · adds ~${f1(T.tonight[id].option)}</span>`;
       return `<tr><td class="slot">${esc(DH.fmt.slot(slots[i]))}</td><td>${who(id)} ${move}</td><td class="small">${g.home ? "vs" : "@"} ${esc(g.opp)}${g.proj != null ? ` · proj ${f1(g.proj)}` : ""}</td><td>${tgt}</td></tr>`;
     }).join("");
     const todaySec = `<section class="section"><div class="section-head"><h2>Today's lineup · ${dayName(today)}</h2>
-        <p>After the locks, every open slot should have someone playing today: a game only counts if he started it. When more of your players play today than you have open slots, the ones whose game today could matter most get the slots. "Lock tonight if" is his target for tonight's game: check back after it and lock if he reached it.</p></div>
+        <p>After the locks, every open slot should have someone playing today: a game only counts if he started it. When more of your players play today than you have open slots, the ones whose game today could matter most get the slots. "Lock tonight if" is his target for tonight's game (check back after it and lock if he reached it); "adds" is what starting him tonight is worth to your week, which is how tonight's slots are handed out.</p></div>
       ${P.openIdx.length ? `<div class="table-wrap"><table class="lineups"><thead><tr><th>Slot</th><th>Start today</th><th>Game</th><th>Lock tonight if</th></tr></thead><tbody>${todayRows}</tbody></table></div>
 `
         : '<div class="empty">Every slot is locked in for the week.</div>'}</section>`;
 
     // Slots and bench, this week
-    const fill = Object.fromEntries(P.projected.fill.filter((f) => f.pid).map((f) => [f.slot, f.pid]));
     const slotRows = slots.map((s, i) => {
       const l = locks[i];
       if (l) return `<tr class="locked-row"><td class="slot">${esc(DH.fmt.slot(s))}</td><td>${who(String(l.pid))} <span class="tag fit">Locked in</span></td>
@@ -239,7 +241,7 @@
       const info = id && P.info[id];
       return `<tr><td class="slot">${esc(DH.fmt.slot(s))}</td><td>${id ? who(id) : '<span class="muted">Empty</span>'}</td>
         <td>${info ? info.games.map((g) => chip(g, info.candidate === g)).join(" ") || '<span class="muted small">No games</span>' : ""}</td>
-        <td class="num">${fill[i] ? f1(P.info[fill[i]].value) : "–"}</td><td></td></tr>`;
+        <td class="num">${info ? f1(info.value) : "–"}</td><td></td></tr>`;
     }).join("");
     const benchIds = Object.keys(me.ps).filter((id) => me.ps[id].slot == null && !Object.values(locks).some((l) => String(l.pid) === id));
     const benchRows = benchIds.sort((a, b) => (P.info[b] ? P.info[b].value : 0) - (P.info[a] ? P.info[a].value : 0)).map((id, k) => {

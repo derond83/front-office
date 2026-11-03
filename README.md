@@ -236,7 +236,7 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
 - **Locks are read from Sleeper**, for you and your opponent: a slot whose counted points match one of its player's
   earlier games after a later game of his has started can only be locked (checked against a full real week: it found
   every lock). Between making a lock and the player's next game, Sleeper's numbers look the same as an unlocked slot,
-  so **I locked him in** marks fill that gap (saved per league and week, and synced). The opponent's projection
+  so **Locked in** marks fill that gap (saved per league and week, and synced). The opponent's projection
   starts from their locks.
 - **A player with no games left** isn't locked automatically: if someone who still plays is expected to beat his score
   in that slot, the call is to give him the slot instead.

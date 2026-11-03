@@ -424,3 +424,82 @@ table.lockin tr.locked-row td { background: var(--good-bg); }
 .rec.rec-start { background: var(--mine-bg); color: var(--mine); }
 .rec.rec-sit { background: var(--sunk); color: var(--muted); }
 .more.small-btn { min-height: 32px; padding: 4px 12px; font-size: .88rem; }
+
+/* ---------- Checklist rows: badge | what to do | button ---------- */
+.todo { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.todo .todo-body { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; min-width: 0; }
+.todo .rec { min-width: 0; justify-self: start; }
+
+/* Folded detail sections */
+details.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+details.fold[open] > summary::before { transform: rotate(90deg); }
+details.fold > summary h2 { font-size: 1.15rem; }
+details.fold[open] > summary { margin-bottom: 4px; }
+.rt-label { display: none; }
+
+/* ---------- Phones ---------- */
+@media (max-width: 600px) {
+  /* League header: compact, team and Settings on one line */
+  .top { gap: 6px; padding-bottom: 10px; border-bottom-width: 2px; }
+  h1 { font-size: 1.7rem; }
+  .top .eyebrow { font-size: .66rem; letter-spacing: .08em; }
+  .whoami { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+  .whoami > .eyebrow { display: none; }
+  .whoami .team-name { font-size: 1rem; }
+  .settings-link { padding: 4px 8px; margin-left: -8px; }
+  .banner { font-size: .9rem; padding: 8px 12px; }
+
+  /* Summary tiles: three across, smaller */
+  .summary { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+  .summary > div { padding: 8px 10px; }
+  .summary .big { font-size: 1.35rem; }
+  .summary .big small { font-size: .8rem; }
+  .summary .small { font-size: .74rem; line-height: 1.25; }
+
+  /* Tabs: all five fit */
+  .subtabs { justify-content: space-between; gap: 0; }
+  .subtabs a { padding: 8px 6px; font-size: .92rem; min-height: 42px; }
+
+  /* Scoreboard: you and them side by side, win chance underneath */
+  .scoreboard .sb-row { grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: start; }
+  .scoreboard .sb-side.right { text-align: right; }
+  .scoreboard .sb-mid { grid-column: 1 / -1; order: 3; text-align: left; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 10px; }
+  .scoreboard .sb-mid .eyebrow { grid-column: 1 / -1; }
+  .scoreboard .sb-mid .big { font-size: 1.5rem; }
+  .scoreboard .big { font-size: 1.9rem; }
+  .scoreboard .sb-side .small { font-size: .74rem; }
+  .card.section { padding: 12px; }
+
+  /* Checklist: button drops under the text */
+  .todo { grid-template-columns: 60px minmax(0, 1fr); gap: 2px 10px; padding: 8px 0; }
+  .todo .rec { font-size: .78rem; padding: 3px 8px; }
+  .todo > button { grid-column: 2; justify-self: start; }
+
+  /* Lock-call cards */
+  .decision { padding: 10px 12px; }
+  .dec-main { flex-basis: 100%; }
+  .decision > button { min-height: 34px; padding: 4px 12px; font-size: .88rem; }
+
+  /* Tables marked .rtable become stacked rows: slot on the left, details on the right */
+  .table-wrap:has(> table.rtable) { overflow: visible; }
+  table.rtable, table.rtable tbody { display: block; }
+  table.rtable thead { display: none; }
+  table.rtable tr { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 3px; padding: 9px 10px; border-top: 1px solid var(--line); }
+  table.rtable tr:first-child { border-top: 0; }
+  table.rtable td { display: block; padding: 0; border: 0; min-width: 0; }
+  table.rtable td.slot { grid-row: 1 / span 3; align-self: start; padding-top: 2px; }
+  table.rtable td.c-who { grid-column: 2; }
+  table.rtable td.c-game, table.rtable td.c-tgt { grid-column: 2 / -1; }
+  table.rtable td.c-val { grid-column: 3; grid-row: 1; text-align: right; white-space: nowrap; }
+  table.rtable td.c-act { grid-column: 3; grid-row: 2; text-align: right; }
+  table.rtable td:empty { display: none; }
+  table.rtable .rt-label { display: inline; color: var(--muted); font-size: .8rem; }
+  table.rtable tr.bench-row.first { border-top: 2px solid var(--line); }
+  table.rtable tr.bench-row.first td { border-top: 0; }
+  table.rtable tr.locked-row { background: var(--good-bg); }
+  table.rtable tr.locked-row td { background: transparent; }
+  /* Four tiles: two by two rather than three and a gap */
+  .summary:has(> :nth-child(4):last-child) { grid-template-columns: repeat(2, 1fr); }
+}

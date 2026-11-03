@@ -424,7 +424,7 @@ def refresh_rankings():
         warn(f"NBA Hashtag Basketball: {e}")
         old = read_js("nba/rankings.js")
         if old:  # keep the last good rankings, flagged so the page can say so
-            old["warnings"] = [f"Hashtag Basketball: {e}"]
+            old["warnings"] = [f"Hashtag Basketball dynasty rankings couldn't be refreshed, so these are from {old.get('updated', 'an earlier day')} ({e})."]
             write_js("nba/rankings.js", "window.HB_RANKINGS", old)
         return
     path = write_js("nba/rankings.js", "window.HB_RANKINGS",
@@ -461,7 +461,7 @@ def refresh_keeper():
         warn(f"NBA Hashtag Basketball keeper values: {e}")
         old = read_js("nba/keeper.js")
         if old:
-            old["warnings"] = [f"Hashtag Basketball keeper values: {e}"]
+            old["warnings"] = [f"Hashtag Basketball keeper values couldn't be refreshed, so these are from {old.get('updated', 'an earlier day')} ({e})."]
             write_js("nba/keeper.js", "window.HB_KEEPER", old)
         return
     path = write_js("nba/keeper.js", "window.HB_KEEPER", {"source": HB_KEEPER_URL, "updated": updated or date.today().isoformat(),

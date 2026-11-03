@@ -13,25 +13,50 @@
   const f1 = (v) => (v == null ? "–" : v.toFixed(1));
   const pct = (v) => `${Math.round(v * 100)}%`;
 
-  /** This week's schedule and box scores, live from Sleeper (fetched once per page view, refreshable). */
+  const STALE = 5 * 60 * 1000; // reload live data older than this when the page is shown again
+
+  /**
+   * This week's schedule, box scores and per-game projections, live from Sleeper. Kept for the page view;
+   * older than STALE, the page keeps showing what it has and reloads in the background.
+   */
   function weekData(season, week, rerender, force) {
     const key = `${season}:${week}`;
-    const have = cache.get(key);
-    if (have && !force && !(have instanceof Promise)) return have;
-    if (!(have instanceof Promise)) {
+    const have = cache.get(key), pending = cache.get(`${key}:pending`);
+    const fresh = have && Date.now() - have.at < STALE;
+    if (!pending && (!have || force || !fresh)) {
       const get = (u) => fetch(u).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
       const p = Promise.all([
         get(`${API}/schedule/nba/regular/${season}`).then((s) => s.filter((g) => g.week === week)).catch(() => null),
         get(`${API}/stats/nba/${season}/${week}?season_type=regular`).catch(() => null),
+        get(`${API}/projections/nba/${season}/${week}?season_type=regular`).catch(() => null),
         DH.loadScript("data/nba/games.js").catch(() => null),
-      ]).then(([schedule, stats]) => { cache.set(key, { at: Date.now(), schedule, stats }); rerender(); })
-        .catch(() => { cache.delete(key); });
-      cache.set(key, p);
+      ]).then(([schedule, stats, projRows]) => {
+        // Per-game projections by player, in the same shape as data/nba/proj.js.
+        let projections = null;
+        if (projRows && projRows.length) {
+          projections = {};
+          for (const r of projRows) {
+            const st = r.stats || {};
+            if (!st.gp) continue;
+            (projections[r.player_id] = projections[r.player_id] || []).push({ d: r.date, opp: r.opponent, gid: r.game_id, s: st });
+          }
+        }
+        cache.set(key, { at: Date.now(), schedule: schedule || (have && have.schedule), stats: stats || (have && have.stats), projections: projections || (have && have.projections) });
+        cache.delete(`${key}:pending`);
+        rerender();
+      }).catch(() => cache.delete(`${key}:pending`));
+      cache.set(`${key}:pending`, p);
     }
-    return have instanceof Promise || !have ? null : have;
+    return have || null;
   }
 
-  /** Locks you've marked for this league and week (Sleeper's API doesn't publish them). */
+  // Coming back to the tab: reload anything stale (the rerender asks for it).
+  let onScreen = null;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && onScreen && onScreen.tab === "matchup" && document.body.contains(onScreen.el)) onScreen.rerender();
+  });
+
+  /** Locks you've marked for this league and week (Sleeper only shows a lock once the player's next game starts). */
   const lockStore = (ctx, season, week) => {
     const saved = ctx.store.get("lockins", null);
     const mine = saved && saved.season === season && saved.week === week ? saved : { season, week, slots: {} };
@@ -45,7 +70,7 @@
    * sp: { chips(groups), groupsOf(id), fits(id, slot) }
    */
   DH.lockinHtml = function (ctx, sp) {
-    current = ctx;
+    current = ctx; onScreen = ctx;
     const proj = window.PROJ_NBA;
     if (!proj) {
       DH.loadScript("data/nba/proj.js").then(ctx.rerender, () => {});
@@ -58,11 +83,15 @@
 
     // Matchup (starters by slot, and Sleeper's running score)
     const mkey = `lockin-m:${ctx.id}:${week}`;
-    if (!cache.has(mkey)) {
-      cache.set(mkey, (data.matchups && data.matchups.week === week ? data.matchups.teams : null) || []);
-      DH.sleeper.get(`/league/${ctx.id}/matchups/${week}`).then((m) => { cache.set(mkey, m || []); ctx.rerender(); }).catch(() => {});
+    const mHave = cache.get(mkey);
+    if (!mHave || (Date.now() - mHave.at > STALE && !cache.get(`${mkey}:pending`))) {
+      if (!mHave) cache.set(mkey, { at: 0, list: (data.matchups && data.matchups.week === week ? data.matchups.teams : null) || [] });
+      cache.set(`${mkey}:pending`, true);
+      DH.sleeper.get(`/league/${ctx.id}/matchups/${week}`)
+        .then((m) => { cache.set(mkey, { at: Date.now(), list: m || [] }); ctx.rerender(); })
+        .catch(() => {}).finally(() => cache.delete(`${mkey}:pending`));
     }
-    const matchups = cache.get(mkey) || [];
+    const matchups = (cache.get(mkey) || {}).list || [];
     const slots = (league.roster_positions || []).filter((s) => !["BN", "IR", "TAXI"].includes(s));
     const scoring = league.scoring_settings || {};
     const score = (stats) => window.LineupEngine.score(stats, scoring);
@@ -83,7 +112,8 @@
       }
     }
     for (const list of Object.values(teamGames)) list.sort((a, b) => a.date.localeCompare(b.date));
-    const projGames = (id) => ((proj.players[id] || {}).gm || []);
+    // Live projections when Sleeper answered (they follow the week rollover); else the twice-daily copy.
+    const projGames = (id) => (wk.projections ? wk.projections[id] || [] : (proj.players[id] || {}).gm || []);
 
     function weekOf(id) {
       const team = players[id] && players[id].team;
@@ -100,7 +130,7 @@
     }
     const active = (r) => { const out = new Set([...(r.reserve || []), ...(r.taxi || [])].map(String)); return (r.players || []).map(String).filter((id) => !out.has(id)); };
 
-    function side(roster, m, locks, extra = {}) {
+    function side(roster, m, marked, extra = {}) {
       const starters = ((m && m.starters) || roster.starters || []).map((x) => (x && x !== "0" ? String(x) : null));
       const ps = {};
       for (const id of active(roster)) {
@@ -110,8 +140,15 @@
         const idx = starters.indexOf(id);
         ps[id] = { hist: thisWeek.concat(older), games, injury: injury(id), slot: idx >= 0 && idx < slots.length ? idx : null };
       }
+      // Locks Sleeper shows: a slot still counting one of its player's earlier games after a later game of
+      // his has started can only be locked. (Between the lock and his next game it looks like any unlocked
+      // slot, so marks you've made fill that gap.)
+      const sleeperLocks = window.LockIn.detectLocks(starters.slice(0, slots.length), (m && m.starters_points) || [], (id) => ps[id] && ps[id].games);
+      const locks = { ...sleeperLocks };
+      const autoPids = new Set(Object.values(sleeperLocks).map((l) => String(l.pid)));
+      for (const [i, l] of Object.entries(marked)) if (!locks[i] && !autoPids.has(String(l.pid))) locks[i] = l;
       const plan = window.LockIn.plan({ slots, fits: sp.fits, players: ps, locks, today, cushion: sp.cushion || 0, ...extra });
-      return { plan, ps, starters };
+      return { plan, ps, starters, locks, auto: Object.keys(sleeperLocks).length };
     }
 
     const mineRoster = data.rosters.find((r) => String(r.roster_id) === String(ctx.rosterId));
@@ -121,11 +158,11 @@
     const oppName = oppRoster ? DH.teamName(data, oppRoster.roster_id) : null;
     const store = lockStore(ctx, season, week);
     // A marked lock whose player has left the roster no longer applies.
-    const locks = Object.fromEntries(Object.entries(store.slots).filter(([, l]) => mineRoster.players.map(String).includes(String(l.pid))));
+    const marked = Object.fromEntries(Object.entries(store.slots).filter(([, l]) => mineRoster.players.map(String).includes(String(l.pid))));
     // Their week first: your targets aim to beat it (Settings > Lock strategy).
     const them = oppRoster ? side(oppRoster, oppM, {}, { cushion: 0, goal: "points" }) : null;
-    const me = side(mineRoster, myM, locks, { goal: sp.goal || "win", oppTotals: them ? them.plan.projected.totals : null });
-    const P = me.plan;
+    const me = side(mineRoster, myM, marked, { goal: sp.goal || "win", oppTotals: them ? them.plan.projected.totals : null });
+    const P = me.plan, locks = me.locks;
 
     // ---- Pieces
     const chip = (g, mark) => {
@@ -142,14 +179,14 @@
     const nLocked = Object.keys(locks).length;
     const board = `<section class="card section scoreboard">
       <div class="section-head"><h2>Week ${week}${oppName ? ` · vs ${esc(oppName)}` : ""}</h2>
-        <p>Lock-In scoring: each starting slot counts one game this week. You lock a starter's game after it ends, before his next one tips off; a slot left open counts its last game, even a zero. Projected finals assume both teams lock well from here.</p></div>
+        <p>Lock-In scoring: each starting slot counts one game this week. You lock a starter's game after it ends, before his next one tips off; a slot left open counts its last game, even a zero. Locks are read from Sleeper once the player's next game starts; mark the ones you make before then. Projected finals assume both teams lock well from here.</p></div>
       <div class="sb-row">
         <div class="sb-side"><span class="eyebrow">You · projected</span><span class="big">${f1(P.projected.total)}</span>
           <span class="small muted">${nLocked} of ${slots.length} slots locked (${f1(P.lockedPts)})${myM && myM.points ? ` · Sleeper: ${f1(myM.points)}` : ""}</span></div>
         ${them ? `<div class="sb-mid"><span class="eyebrow">Win chance</span><span class="big">${pct(wp)}</span>
           <div class="wp" role="img" aria-label="Win chance ${pct(wp)}"><i style="width:${(wp * 100).toFixed(0)}%"></i></div></div>
         <div class="sb-side right"><span class="eyebrow">${esc(oppName)} · projected</span><span class="big">${f1(them.plan.projected.total)}</span>
-          <span class="small muted">${oppM && oppM.points ? `Sleeper: ${f1(oppM.points)} · ` : ""}their locks aren't public</span></div>`
+          <span class="small muted">${Object.keys(them.locks).length} of ${slots.length} slots locked (${f1(them.plan.lockedPts)})${oppM && oppM.points ? ` · Sleeper: ${f1(oppM.points)}` : ""}</span></div>`
         : `<div class="sb-side"><span class="muted">${matchups.length ? "No opponent this week." : "This week's matchups aren't set in Sleeper yet."}</span></div>`}
       </div></section>`;
 
@@ -179,7 +216,7 @@
       const reason = !plays ? "no game today"
         : tn && !tn.last ? `plays today, but starting him tonight adds only about ${f1(tn.option)} to your week (target ${f1(tn.target)}, ${tn.left} game${tn.left === 1 ? "" : "s"} left after); the open slots go to players who add more`
         : "plays today, but the others' games tonight matter more";
-      const why = d ? `don't lock ${f1(d.x)} (target ${f1(d.target)}); ${reason}` : reason;
+      const why = d ? `don't lock ${f1(d.x)} (target ${f1(d.target)})${d.why === "replace" ? ", no games left" : ""}; ${reason}` : reason;
       todo.push(`<li class="todo"><span class="rec rec-sit">Bench</span><span>${who(id)} <span class="small muted">${why}</span></span></li>`);
     }
     for (const d of holdNow.filter((x) => !outs.includes(x.pid))) todo.push(`<li class="todo"><span class="rec rec-hold">Hold</span><span>${who(d.pid)} <span class="small muted">${esc(DH.fmt.slot(slots[d.slot]))}</span>
@@ -194,6 +231,7 @@
       const info = P.info[d.pid];
       const g = d.game;
       const why = d.why === "last" ? "No games left this week, so this is his score either way. Lock it so a later lineup move can't replace it."
+        : d.why === "replace" ? `No games left, but ${f1(d.x)} is low for this slot: ${d.instead ? `${esc(pname(d.instead))} still plays and` : "someone who still plays"} is expected to beat it here. Don't lock; give him the slot.`
         : d.why === "slots" && d.rec === "hold" ? `On his own this is a lock, but locking would use up a slot ${d.instead ? `${esc(pname(d.instead))} is expected to fill for more` : "your other players are expected to fill for more"} later this week. Hold, and start him there when he plays.`
         : d.why === "slots" ? `Holding would usually pay off for him, but your open slots are filling up: banking ${f1(d.x)} now is worth more to the team.`
         : d.why === "cushion" ? `Just under the target of ${f1(d.target)}, but within your ${f1(sp.cushion)}-point cushion, so lock.`
@@ -234,9 +272,9 @@
     // Slots and bench, this week
     const slotRows = slots.map((s, i) => {
       const l = locks[i];
-      if (l) return `<tr class="locked-row"><td class="slot">${esc(DH.fmt.slot(s))}</td><td>${who(String(l.pid))} <span class="tag fit">Locked in</span></td>
+      if (l) return `<tr class="locked-row"><td class="slot">${esc(DH.fmt.slot(s))}</td><td>${who(String(l.pid))} <span class="tag fit">Locked in</span>${l.auto ? ' <span class="small muted">per Sleeper</span>' : ""}</td>
         <td class="small">${dayName(l.date)}: <b>${f1(Number(l.pts))}</b></td><td class="num"><b>${f1(Number(l.pts))}</b></td>
-        <td><button type="button" class="linklike small" data-unlockin="${i}">Undo</button></td></tr>`;
+        <td>${l.auto ? "" : `<button type="button" class="linklike small" data-unlockin="${i}">Undo</button>`}</td></tr>`;
       const id = me.starters[i];
       const info = id && P.info[id];
       return `<tr><td class="slot">${esc(DH.fmt.slot(s))}</td><td>${id ? who(id) : '<span class="muted">Empty</span>'}</td>
@@ -274,7 +312,10 @@
     const proj = window.PROJ_NBA, ctx = current;
     const season = Number(proj.season), week = Number((ctx.data.state && ctx.data.state.week) || proj.week);
     const store = lockStore(ctx, season, week);
-    if (b.hasAttribute("data-lockin-refresh")) { weekData(season, week, ctx.rerender, true); return; }
+    if (b.hasAttribute("data-lockin-refresh")) {
+      const m = cache.get(`lockin-m:${ctx.id}:${week}`); if (m) m.at = 0;
+      weekData(season, week, ctx.rerender, true); ctx.rerender(); return;
+    }
     if (b.dataset.lockin != null) store.set(b.dataset.lockin, { pid: b.dataset.pid, pts: Number(b.dataset.pts), date: b.dataset.date });
     else store.set(b.dataset.unlockin, null);
     ctx.rerender();

@@ -235,7 +235,9 @@
       const from = info[id].slot, p = ix[id];
       const ok = (i) => openIdx.includes(i) && !taken.has(i) && fitsIx[p][i];
       if (from != null && ok(from)) {
-        const better = narrowFirst.find((i) => ok(i) && flex[i] < flex[from] && o.slots[i] !== o.slots[from] && (!occupant[i] || o.fits(occupant[i], o.slots[from])));
+        // Only out of the catch-all slot (UTIL): moving between positions just adds clicks.
+        const catchAll = flex[from] === Math.max(...flex);
+        const better = !catchAll ? undefined : narrowFirst.find((i) => ok(i) && flex[i] < flex[from] && o.slots[i] !== o.slots[from] && (!occupant[i] || o.fits(occupant[i], o.slots[from])));
         return better != null ? better : from;
       }
       const twin = from != null ? narrowFirst.find((i) => ok(i) && o.slots[i] === o.slots[from]) : undefined;
@@ -251,12 +253,18 @@
       const beatHist = p.hist.filter((v) => v > x).length;
       const lockSlot = lockSlotFor(id, new Set());
       const base = { pid: id, slot: p.slot, lockSlot, game: c, x, hold: p.hold, left: p.upcoming.length, beatHist, nHist: p.hist.length };
-      if (p.hold == null) { decisions.push({ ...base, rec: "lock", why: "last", pBeat: 0, target: 0 }); continue; }
-      const pBeat = beatChance(p.dists, x);
+      // No games left: his score counts if he stays, but the slot may be worth more to someone who still plays.
+      const pBeat = p.hold == null ? 0 : beatChance(p.dists, x);
       const target = targetFor(simulate({ drop: id }), simulate({ lockNow: { pid: id, slot: lockSlot } }), lockedPts);
-      const own = x >= p.hold ? "lock" : "hold";
+      const own = p.hold == null || x >= p.hold ? "lock" : "hold";
       const rec = x >= target - cushion ? "lock" : "hold";
       const close = rec === "lock" && x < target;
+      if (p.hold == null) {
+        const instead = rec === "hold" ? pool.filter((q) => q !== id && info[q].upcoming.length && o.fits(q, o.slots[p.slot]))
+          .sort((a2, b2) => (info[b2].hold || 0) - (info[a2].hold || 0))[0] || null : null;
+        decisions.push({ ...base, rec, own, pBeat: 0, target, close, why: rec === "lock" ? "last" : "replace", instead });
+        continue;
+      }
       // When the slot is what's being saved: the bench player most likely to use it.
       const instead = rec === "hold" && own === "lock"
         ? pool.filter((q) => q !== id && info[q].upcoming.length && o.fits(q, o.slots[p.slot]))
@@ -356,7 +364,24 @@
     }
   }
 
-  const api = { plan, gameDist, holdValue, beatChance, expected, PLAYS, DEFAULTS };
+  /**
+   * Locks Sleeper's matchup data reveals. A slot still counting one of its player's earlier games after a
+   * later game of his has started can only be locked. starters: pid per slot; points: Sleeper's
+   * starters_points; gamesOf(pid): his games this week in order, as in plan(). -> { slot: { pid, pts, date } }
+   */
+  function detectLocks(starters, points, gamesOf) {
+    const out = {};
+    starters.forEach((id, i) => {
+      if (!id || !(points[i] > 0)) return;
+      const games = gamesOf(id) || [];
+      const k = games.findIndex((g, j) => g.state === "done" && !g.dnp && Math.abs(g.pts - points[i]) < 0.15
+        && games.slice(j + 1).some((x) => x.state !== "upcoming"));
+      if (k >= 0) out[i] = { pid: id, pts: games[k].pts, date: games[k].date, auto: true };
+    });
+    return out;
+  }
+
+  const api = { plan, detectLocks, gameDist, holdValue, beatChance, expected, PLAYS, DEFAULTS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.LockIn = api;
 })(typeof window !== "undefined" ? window : globalThis);

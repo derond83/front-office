@@ -233,10 +233,17 @@ scoring switches to "Every game counts" for leagues that add up all games). `js/
   games left gains little from tonight; a volatile one can gain a lot). Players already in a slot stay put where possible.
 - **Your week**: each slot's player and his games (finished games with their score, the lockable one highlighted),
   then the bench. The projected total is your locked points plus the best expected fill of the open slots.
-- Sleeper doesn't publish which games you've locked, so you mark them with **I locked him in** (saved per league and
-  week, and synced). The opponent's projection assumes they lock well from here.
-- Data: this week's schedule and box scores load live from Sleeper (`api.sleeper.com`); recent games
-  (`data/nba/games.js`) and per-game projections (`data/nba/proj.js`) are refreshed twice a day.
+- **Locks are read from Sleeper**, for you and your opponent: a slot whose counted points match one of its player's
+  earlier games after a later game of his has started can only be locked (checked against a full real week: it found
+  every lock). Between making a lock and the player's next game, Sleeper's numbers look the same as an unlocked slot,
+  so **I locked him in** marks fill that gap (saved per league and week, and synced). The opponent's projection
+  starts from their locks.
+- **A player with no games left** isn't locked automatically: if someone who still plays is expected to beat his score
+  in that slot, the call is to give him the slot instead.
+- **Moves before locking** are only ever out of UTIL; moving between positional slots gains nothing.
+- Data: this week's schedule, box scores and per-game projections load live from Sleeper (`api.sleeper.com`), and
+  reload when the page is shown again after 5 minutes; recent games (`data/nba/games.js`) are refreshed twice a day,
+  and `data/nba/proj.js` is the fallback for projections.
 
 Projections are refreshed twice a day (6 AM and noon Eastern).
 

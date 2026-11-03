@@ -269,5 +269,29 @@ for (const home of window.HOME_LEAGUES) {
   test("lock-in: win strategy holds out when behind", () => assert.ok(behind > pts, `behind ${behind.toFixed(1)} vs points ${pts.toFixed(1)}`));
 }
 
+{
+  const LockIn = load("js/lockin.js");
+  const g = (date, state, pts) => ({ date, state, pts, opp: "XXX" });
+  const games = {
+    a: [g("2026-10-27", "done", 41.2), g("2026-10-29", "done", 22.0)],      // counts Tuesday after Thursday: locked
+    b: [g("2026-10-27", "done", 30.5), g("2026-10-30", "upcoming")],        // latest game, next not started: can't tell
+    c: [g("2026-10-27", "done", 18.0), g("2026-10-29", "live", 9.0)],       // earlier game while his next is on: locked
+    d: [g("2026-10-27", "done", 25.0), g("2026-10-29", "done", 31.0)],      // counts his latest: not provably locked
+  };
+  const found = LockIn.detectLocks(["a", "b", "c", "d", null], [41.2, 30.5, 18.0, 31.0, 0], (id) => games[id]);
+  test("lock-in: locks are read from Sleeper's slot points", () => {
+    assert.deepStrictEqual(Object.keys(found).sort(), ["0", "2"]);
+    assert.strictEqual(found[0].pts, 41.2); assert.strictEqual(found[2].date, "2026-10-27");
+  });
+  test("lock-in: a player with no games left can give up his slot", () => {
+    const plan = LockIn.plan({ slots: ["G"], fits: () => true, today: "2026-11-01", players: {
+      low: { hist: [20, 20, 20, 20, 20], slot: 0, games: [{ date: "2026-10-30", state: "done", pts: 12 }] },
+      bench: { hist: [35, 30, 40, 32, 38], slot: null, games: [{ date: "2026-11-01", state: "upcoming", proj: 35 }] },
+    } });
+    const d = plan.decisions[0];
+    assert.strictEqual(d.rec, "hold"); assert.strictEqual(d.why, "replace"); assert.strictEqual(plan.today.lineup[0], "bench");
+  });
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

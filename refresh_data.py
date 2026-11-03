@@ -398,8 +398,10 @@ def parse_rankings(page):
         move = 0
         if trend and trend.group(2):
             move = int(trend.group(2)) * (1 if "up" in trend.group(1) else -1)
+        # A dash means no stat yet (e.g. hasn't played this season): leave it out.
         stats = {lab: float(val) for val, lab in
-                 re.findall(r'<div class="m [^"]*">([-\d.]+)<small>([^<]+)</small>', card)}
+                 re.findall(r'<div class="m [^"]*">([-\d.]+)<small>([^<]+)</small>', card)
+                 if re.fullmatch(r"-?\d+(\.\d+)?|-?\.\d+", val)}
         gp = re.search(r'Season</td>\s*<td class="d-none">[^<]*</td>\s*<td>(\d+)</td>', card)
         outlook = re.search(r'class="dyn-outlook">(.*?)</div>', card, re.S)
         hbid = re.search(r"href='/(\d+)/dynasty'", card)
